@@ -504,10 +504,13 @@
         ⑤ <b>期望最少年限</b>：<b>暂不纳入评分</b>，字段保留但禁用，等评分模型稳定再启用。
       </td></tr>
   <tr><td><b>岗位推荐</b></td>
-      <td>筛选条件 / 候选岗位卡（可折叠）</td>
+      <td>候选岗位卡（可折叠，筛选条件收进右上角「高级」）</td>
       <td>
         ① <b>评分公式改为</b>：职位名 30 + 技能 30 + 城市 <b>20</b> + 薪资 <b>20</b>
            （去掉经验 15 分；城市、薪资权重各提 5 分）。<br>
+        ①b <b>「筛选条件」收进「今日候选」面板右上角的「高级」按钮</b>，默认折叠。
+           关键词 / 分数线 / 单次抓取上限 / 请求间隔 / 每天抓取次数 全部在里面，
+           <b>不再单独开一个筛选面板</b>。<br>
         ② <b>岗位卡折叠</b>：默认只显示 岗位名 / 公司 / 薪资 / 地点 / 学历 / 年限 / 分数；
            展开才显示命中与缺口明细。<br>
         ③ <b>操作按钮在评分下方，三枚<b>同行横排</b></b>：<br>
@@ -642,4 +645,46 @@
   选了历史简历<b>不等于</b>授权投递 —— 选定后还要走确认。
 </div>
 
+
+<h2>十、版本管理与发布（2026-10-26 起）</h2>
+<p class="sub">项目要开源到 GitHub，仓库结构、脱敏规则、发布流程固定下来。</p>
+
+<table>
+  <tr><th style="width:20%">项</th><th>规则</th></tr>
+  <tr><td><b>仓库名</b></td>
+      <td><code>Good-job-Ez</code>，中文名「好岗好找」</td></tr>
+  <tr><td><b>仓库结构</b></td>
+      <td>
+        <code>src/job_radar/</code> 插件本体（含 tests/）<br>
+        <code>docs/</code> 开发文档、流程图 PDF、设置页 demo、抓取层现状<br>
+        <code>examples/</code> 示例与配置模板
+      </td></tr>
+  <tr><td><b>脱敏规则</b></td>
+      <td>
+        仓库里<b>不得出现</b>：真实姓名、手机号、邮箱、本机绝对路径、
+        真实公司名、cookie 值、真实经历原文。<br>
+        演示数据一律用「张三」「某人力资源有限公司」「user@example.com」这类占位。<br>
+        profile.yaml（个人画像）<b>只提交 profile.example.yaml</b>，
+        真身进 .gitignore。
+      </td></tr>
+  <tr><td><b>.gitignore</b></td>
+      <td>排除 profile.yaml / resume/ / uploads/ / jobs.db / reports/ /
+          *.docx / *.pdf（docs 下的例外）/ __pycache__ / .env / node_modules/ /
+          sites/（私有 adapter）</td></tr>
+  <tr><td><b>.gitattributes</b></td>
+      <td>统一 <code>eol=lf</code>，避免跨平台 diff 噪音；二进制文件标 binary</td></tr>
+  <tr><td><b>许可</b></td>
+      <td>MIT</td></tr>
+  <tr><td><b>提交规范</b></td>
+      <td>Conventional Commits：<code>feat:</code> <code>fix:</code> <code>docs:</code>
+          <code>refactor:</code> <code>chore:</code></td></tr>
+</table>
+
+<div class="warn">
+  <b>发布前必查</b>：<br>
+  ① <code>git ls-files</code> 里没有 profile.yaml、jobs.db、任何 .docx<br>
+  ② 全仓扫一遍真实姓名 / 手机号 / 邮箱 / 本机路径 / 真实公司名<br>
+  ③ <code>python -m unittest discover -s tests</code> 全过<br>
+  ④ README 里的安装步骤在干净环境能走通
+</div>
 
