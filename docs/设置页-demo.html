@@ -1,0 +1,2164 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>好岗好找 · 设置</title>
+<style>
+/* ============================================================
+   主题令牌 — 直接吃 Hermes 桌面端的 --dt-* 变量。
+   不提供主题选择器：跟随 Hermes 设置走（见底部 JS）。
+   独立打开时用 ?skin=<name>&mode=<light|dark> 预览某套皮肤。
+   ============================================================ */
+:root {
+  --dt-background: #ffffff;
+  --dt-foreground: #1f2328;
+  --dt-card: #f6f8fa;
+  --dt-card-foreground: #1f2328;
+  --dt-muted: #f6f6f6;
+  --dt-muted-foreground: #656d76;
+  --dt-popover: #ffffff;
+  --dt-popover-foreground: #1f2328;
+  --dt-primary: #0053fd;
+  --dt-primary-foreground: #ffffff;
+  --dt-secondary: #deeaff;
+  --dt-secondary-foreground: #1f2328;
+  --dt-accent: #e3edff;
+  --dt-accent-foreground: #1f2328;
+  --dt-border: #d0d7de;
+  --dt-input: #ffffff;
+  --dt-ring: #0053fd;
+  --dt-midground: #0053fd;
+  --dt-midground-foreground: #ffffff;
+  --dt-destructive: #cf222e;
+  --dt-destructive-foreground: #ffffff;
+  --dt-sidebar-bg: #f6f8fa;
+  --dt-sidebar-border: #d0d7de;
+  --dt-user-bubble: #dae7fd;
+  --dt-user-bubble-border: #d0d7de;
+
+  --accent: var(--dt-primary);
+  --accent-fg: var(--dt-primary-foreground);
+  --accent-soft: var(--dt-accent);
+  --bg: var(--dt-background);
+  --surface: var(--dt-card);
+  --surface-2: var(--dt-popover);
+  --border: var(--dt-border);
+  --border-strong: color-mix(in srgb, var(--dt-foreground) 22%, transparent);
+  --ink: var(--dt-foreground);
+  --ink-2: color-mix(in srgb, var(--dt-muted-foreground) 88%, var(--dt-foreground));
+  --ink-3: color-mix(in srgb, var(--dt-muted-foreground) 72%, var(--dt-foreground));
+  --ok: color-mix(in srgb, #1a7f4b 82%, var(--dt-foreground));
+  --ok-soft: color-mix(in srgb, #1a7f4b 13%, var(--dt-card));
+  --warn: color-mix(in srgb, #9a6408 88%, var(--dt-foreground));
+  --warn-soft: color-mix(in srgb, #9a6408 14%, var(--dt-card));
+  --danger: var(--dt-destructive);
+  --danger-soft: color-mix(in srgb, var(--dt-destructive) 13%, var(--dt-card));
+
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow: 0 1px 2px color-mix(in srgb, var(--dt-foreground) 7%, transparent),
+            0 6px 20px -12px color-mix(in srgb, var(--dt-foreground) 22%, transparent);
+  --font: var(--dt-font-sans, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif);
+  --mono: var(--dt-font-mono, "SF Mono", Consolas, "Liberation Mono", monospace);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.6 var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--accent); }
+code { font-family: var(--mono); font-size: .92em; }
+
+/* ---------------- 布局 ---------------- */
+.app { display: grid; grid-template-columns: 208px 1fr; min-height: 100vh; }
+.sidebar {
+  background: var(--surface); border-right: 1px solid var(--border);
+  padding: 18px 12px; position: sticky; top: 0; height: 100vh;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.brand { display: flex; align-items: center; gap: 9px; padding: 4px 8px 18px; }
+.brand-mark {
+  width: 26px; height: 26px; border-radius: 7px; flex: 0 0 auto;
+  background: var(--accent); color: var(--accent-fg);
+  display: grid; place-items: center; font-size: 13px; font-weight: 700;
+}
+.brand-name { font-weight: 650; font-size: 14px; letter-spacing: .2px; }
+.brand-sub { font-size: 11px; color: var(--ink-3); margin-top: -2px; }
+.nav-item {
+  display: flex; align-items: center; gap: 9px; width: 100%;
+  padding: 8px 10px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; cursor: pointer; text-align: left;
+  color: var(--ink-2); font-size: 13.5px;
+}
+.nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.nav-item[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .55; }
+.nav-item[aria-selected="true"] .dot { opacity: 1; }
+.nav-item .badge {
+  margin-left: auto; font-size: 11px; padding: 1px 6px; border-radius: 20px;
+  background: var(--warn-soft); color: var(--warn); font-weight: 600;
+}
+
+.main { padding: 26px 34px 60px; max-width: 980px; }
+.page-head { margin-bottom: 22px; display: flex; align-items: flex-start; gap: 16px; }
+.page-title { font-size: 21px; font-weight: 650; margin: 0 0 4px; letter-spacing: -.2px; }
+.page-desc { color: var(--ink-3); font-size: 13px; margin: 0; }
+.page-head .spacer { margin-left: auto; }
+
+.panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  margin-bottom: 16px; overflow: hidden;
+}
+.panel-head {
+  padding: 13px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.panel-head h2 { font-size: 14px; font-weight: 620; margin: 0; }
+.panel-head .hint { color: var(--ink-2); font-size: 12px; margin-left: auto; }
+.panel-head .tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.panel-head .hint + .tools { margin-left: 0; }
+
+/* 帮助按钮 */
+.help-btn {
+  width: 19px; height: 19px; border-radius: 50%; flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, var(--dt-foreground) 30%, transparent);
+  background: transparent; color: var(--ink-2); cursor: pointer;
+  font-size: 11px; font-weight: 700; line-height: 1; padding: 0;
+  display: grid; place-items: center; transition: border-color .12s, color .12s;
+}
+.help-btn:hover { border-color: var(--accent); color: var(--accent); }
+.help-btn[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.help-pop {
+  display: none; margin: 0 18px 14px 18px; padding: 11px 14px;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.7;
+}
+.help-pop.open { display: block; }
+.help-pop b { color: var(--ink); font-weight: 600; }
+.help-pop .warn-line { color: var(--warn); display: block; margin-top: 6px; }
+.panel-body { padding: 16px 18px; }
+.panel-body.tight { padding: 0; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
+.field.span-2 { grid-column: 1 / -1; }
+.field label {
+  display: block; font-size: 12.5px; font-weight: 560; color: var(--ink-2);
+  margin-bottom: 5px;
+}
+.field label .opt { font-weight: 400; color: var(--ink-3); }
+.field input[type="text"], .field input[type="number"], .field select, .field textarea {
+  width: 100%; padding: 7px 10px; background: var(--surface-2);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  outline: none; transition: border-color .12s, box-shadow .12s;
+}
+.field textarea { resize: vertical; min-height: 88px; line-height: 1.65; }
+.field input:focus, .field select:focus, .field textarea:focus {
+  border-color: var(--dt-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--dt-ring) 22%, transparent);
+}
+.field input:disabled, .field select:disabled, .field textarea:disabled {
+  opacity: .6; cursor: not-allowed;
+}
+.field .desc { font-size: 12px; color: var(--ink-2); margin-top: 4px; }
+.field .desc.muted { color: var(--ink-3); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--dt-ring) 30%, transparent); border-radius: 20px;
+  padding: 3px 6px 3px 10px; font-size: 12.5px;
+}
+.chip button {
+  border: 0; background: transparent; color: inherit; cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 2px 5px; opacity: .55; min-width: 22px;
+}
+.chip button:hover { opacity: 1; }
+.chip.ghost { background: var(--surface-2); color: var(--ink-2); border-color: var(--border-strong); }
+.chip-add {
+  border: 1px dashed var(--border-strong); background: transparent;
+  color: var(--ink-3); border-radius: 20px; padding: 3px 10px;
+  font-size: 12.5px; cursor: pointer;
+}
+.chip-add:hover { border-color: var(--accent); color: var(--accent); }
+
+.switch { display: flex; align-items: flex-start; gap: 10px; padding: 11px 0; }
+.switch + .switch { border-top: 1px solid var(--border); }
+.switch-main { flex: 1; }
+.switch-title { font-size: 13.5px; font-weight: 560; }
+.switch-desc { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.toggle {
+  flex: 0 0 auto; width: 38px; height: 22px; border-radius: 20px;
+  border: 1px solid var(--border-strong); background: var(--surface-2);
+  cursor: pointer; position: relative; padding: 0; margin-top: 2px;
+  transition: background .15s, border-color .15s;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 16px; height: 16px; border-radius: 50%; background: var(--ink-3);
+  transition: transform .15s, background .15s;
+}
+.toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.toggle[aria-checked="true"]::after { transform: translateX(16px); background: var(--accent-fg); }
+
+.status-line {
+  display: flex; align-items: center; gap: 9px; padding: 9px 12px;
+  border-radius: var(--radius-sm); font-size: 12.5px; margin-bottom: 12px;
+}
+.status-line.ok { background: var(--ok-soft); color: var(--ok); }
+.status-line.warn { background: var(--warn-soft); color: var(--warn); }
+.status-line.danger { background: var(--danger-soft); color: var(--danger); }
+.status-line .spacer { margin-left: auto; }
+.status-line .msg { min-width: 0; text-wrap: pretty; }
+.status-line > span:first-of-type { flex: 0 0 auto; }
+.status-line .btn { flex: 0 0 auto; }
+
+/* ---------------- 岗位卡 ---------------- */
+.job-list { display: flex; flex-direction: column; }
+.job-card { border-bottom: 1px solid var(--border); }
+.job-card:last-child { border-bottom: 0; }
+.job-row {
+  display: flex; align-items: flex-start; gap: 12px; padding: 13px 18px;
+  cursor: pointer; transition: background .12s;
+}
+.job-row:hover { background: var(--surface-2); }
+.job-main { flex: 1; min-width: 0; }
+.job-title { font-weight: 570; font-size: 14px; }
+.job-sub { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+.job-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; font-size: 12.5px; color: var(--ink-2); }
+.job-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.job-side {
+  display: flex; flex-direction: column; align-items: stretch; gap: 7px;
+  flex: 0 0 auto;
+}
+.job-side .score { align-self: flex-end; }
+.job-btns { display: flex; gap: 6px; justify-content: flex-end; }
+.job-btns .btn { white-space: nowrap; }
+.job-actions { display: flex; align-items: center; gap: 8px; padding: 0 18px 13px 18px; }
+.score {
+  display: inline-block; min-width: 36px; text-align: center;
+  font-variant-numeric: tabular-nums; font-weight: 650; font-size: 12.5px;
+  padding: 2px 7px; border-radius: 6px; border: 1px solid transparent;
+}
+.score.hi { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 30%, transparent); }
+.score.mid { background: var(--warn-soft); color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, transparent); }
+.score.low { background: var(--surface-2); color: var(--ink-3); border-color: color-mix(in srgb, var(--dt-foreground) 14%, transparent); }
+.caret { color: var(--ink-3); transition: transform .15s; font-size: 11px; }
+.job-card.open .caret { transform: rotate(90deg); }
+.job-detail { display: none; padding: 0 18px 14px 18px; }
+.job-card.open .job-detail { display: block; }
+.tagline { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.tag {
+  font-size: 11.5px; padding: 1px 7px; border-radius: 4px; line-height: 1.5;
+  background: var(--ok-soft); color: var(--ok);
+  border: 1px solid color-mix(in srgb, var(--ok) 34%, transparent); font-weight: 500;
+}
+.tag::before { content: "✓ "; font-size: 10px; opacity: .75; }
+.tag.miss {
+  background: transparent; color: var(--ink-3);
+  border-color: color-mix(in srgb, var(--dt-foreground) 16%, transparent);
+  border-style: dashed; text-decoration: line-through; font-weight: 400;
+}
+.tag.miss::before { content: "✕ "; font-size: 9px; opacity: .7; }
+.tag-label { font-size: 11.5px; color: var(--ink-3); margin: 8px 0 0; }
+.detail-note { font-size: 12px; color: var(--ink-3); margin-top: 10px; }
+
+/* ---------------- 平台 ---------------- */
+.platform { padding: 13px 18px; }
+.platform + .platform { border-top: 1px solid var(--border); }
+.platform-row { display: flex; align-items: center; gap: 13px; }
+.platform-logo {
+  width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto;
+  display: grid; place-items: center; font-weight: 700; font-size: 13px; color: #fff;
+}
+.platform-main { flex: 1; min-width: 0; }
+.platform-name { font-weight: 580; font-size: 13.5px; display: flex; align-items: center; gap: 7px; }
+.platform-meta { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.pill { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 20px; border: 1px solid transparent; }
+.pill.ok { background: var(--ok-soft); color: var(--ok); }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }
+.pill.off { background: var(--surface-2); color: var(--ink-2); border-color: color-mix(in srgb, var(--dt-foreground) 26%, transparent); }
+.cred {
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--dt-foreground) 22%, transparent);
+  border-radius: 5px; padding: 1px 7px; display: inline-block; margin: 2px 4px 2px 0;
+}
+
+/* 高级面板 */
+.adv-panel {
+  display: none; margin: 10px 0 0 0; padding: 4px 14px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-top: 12px;
+}
+.adv-panel.open { display: block; }
+.adv-title {
+  font-size: 11.5px; font-weight: 650; color: var(--ink-2);
+  text-transform: uppercase; letter-spacing: .6px; padding: 10px 0 2px;
+}
+.adv-panel .switch:first-of-type { border-top: 0; }
+
+/* ---------------- 模板 ---------------- */
+.tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 14px; }
+.tpl-card {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  overflow: hidden; background: var(--surface-2); cursor: pointer;
+  transition: border-color .12s, box-shadow .12s, transform .12s;
+  position: relative;
+}
+.tpl-card:hover { border-color: var(--dt-ring); transform: translateY(-1px); box-shadow: var(--shadow); }
+.tpl-card[aria-pressed="true"] { border-color: var(--dt-ring); box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-ring) 30%, transparent); }
+.tpl-thumb {
+  height: 138px; background: var(--dt-background); border-bottom: 1px solid var(--border);
+  padding: 9px 11px; overflow: hidden; pointer-events: none;
+}
+.tpl-info { padding: 9px 11px; }
+.tpl-name { font-size: 13px; font-weight: 570; }
+.tpl-desc { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.tpl-check {
+  position: absolute; top: 7px; right: 7px; width: 19px; height: 19px;
+  border-radius: 50%; background: var(--accent); color: var(--accent-fg);
+  display: none; place-items: center; font-size: 11px;
+}
+.tpl-card[aria-pressed="true"] .tpl-check { display: grid; }
+.tpl-badge {
+  position: absolute; top: 7px; left: 7px; font-size: 10px; font-weight: 650;
+  padding: 1px 6px; border-radius: 20px;
+  background: var(--accent); color: var(--accent-fg);
+}
+
+/* 缩略图里的迷你简历 */
+.mini { font-size: 5px; line-height: 1.45; color: var(--ink-2); }
+.mini .m-name { font-size: 9px; font-weight: 700; color: var(--ink); }
+.mini .m-sub { font-size: 5.5px; color: var(--ink-3); }
+.mini .m-bar { height: 3px; background: var(--accent); border-radius: 2px; margin: 5px 0 4px; }
+.mini .m-sec { font-size: 5.5px; font-weight: 700; color: var(--ink); margin: 5px 0 2px; }
+.mini .m-line { height: 2px; background: var(--border); border-radius: 1px; margin: 2px 0; }
+.mini .m-line.w60 { width: 60%; } .mini .m-line.w80 { width: 80%; } .mini .m-line.w45 { width: 45%; }
+.mini.two { display: grid; grid-template-columns: 1fr 1.9fr; gap: 7px; }
+.mini.two .m-side { border-right: 1px solid var(--border); padding-right: 6px; }
+.mini.tech .m-bar { background: var(--ink-3); }
+.mini.acad { font-family: Georgia, "Songti SC", serif; }
+.mini.acad .m-name { font-family: Georgia, serif; font-size: 10px; letter-spacing: .5px; }
+
+/* ---------------- 用户简历列表 ---------------- */
+.resume-list { display: flex; flex-direction: column; }
+.resume-item {
+  display: flex; align-items: center; gap: 14px; padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.resume-item:last-child { border-bottom: 0; }
+.resume-item:hover { background: var(--surface-2); }
+.resume-thumb {
+  width: 54px; height: 68px; flex: 0 0 auto; border-radius: 4px;
+  background: var(--dt-background); border: 1px solid var(--border);
+  overflow: hidden; padding: 6px; position: relative;
+}
+.resume-thumb::after {
+  content: "PDF"; position: absolute; bottom: 3px; right: 4px;
+  font-size: 6.5px; font-weight: 700; color: var(--ink-3);
+}
+.resume-main { flex: 1; min-width: 0; }
+.resume-name { font-size: 13.5px; font-weight: 570; }
+.resume-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.resume-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+
+/* 自定义模板卡 */
+.tpl-upload { border-style: dashed; }
+.tpl-upload:hover { border-color: var(--dt-ring); }
+.tpl-upload[aria-pressed="true"] { border-style: solid; }
+
+/* ---------------- 上传 ---------------- */
+.upload-zone {
+  border: 1px dashed var(--border-strong); border-radius: var(--radius-sm);
+  padding: 18px; text-align: center; background: var(--surface-2);
+  cursor: pointer; transition: border-color .12s, background .12s;
+}
+.upload-zone:hover { border-color: var(--dt-ring); background: var(--accent-soft); }
+.upload-zone.has-file { border-style: solid; border-color: var(--ok); background: var(--ok-soft); }
+.upload-zone .uz-title { font-size: 13px; font-weight: 550; }
+.upload-zone .uz-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.avatar-upload {
+  width: 76px; height: 92px; border-radius: var(--radius-sm);
+  border: 1px dashed var(--border-strong); background: var(--surface-2);
+  display: grid; place-items: center; cursor: pointer; overflow: hidden;
+  font-size: 11px; color: var(--ink-3); text-align: center; line-height: 1.4;
+}
+.avatar-upload:hover { border-color: var(--dt-ring); color: var(--accent); }
+.avatar-upload img { width: 100%; height: 100%; object-fit: cover; }
+
+/* ---------------- 日报 ---------------- */
+.report-preview {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 16px 18px;
+  font-size: 13px; line-height: 1.75;
+}
+.report-preview h3 { font-size: 14px; margin: 0 0 3px; font-weight: 620; }
+.report-preview .rp-meta { color: var(--ink-3); font-size: 12px; margin-bottom: 14px; }
+.report-preview .rp-item { padding: 11px 0; border-top: 1px solid var(--border); }
+.report-preview .rp-item:first-of-type { border-top: 0; }
+.rp-title { font-weight: 570; }
+.rp-why { color: var(--ink-2); font-size: 12.5px; margin-top: 3px; }
+.rp-gap { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+
+.chat-preview { display: flex; flex-direction: column; gap: 9px; }
+.bubble {
+  align-self: flex-start; max-width: 420px; background: var(--accent-soft);
+  border: 1px solid color-mix(in srgb, var(--dt-ring) 30%, transparent); color: var(--ink);
+  border-radius: 10px 10px 10px 3px; padding: 7px 12px; font-size: 13px;
+  line-height: 1.55; position: relative; white-space: pre-wrap;
+}
+.bubble .n { display: inline-block; min-width: 26px; color: var(--ink-3); font-size: 11px; }
+.bubble .u {
+  display: block; margin-left: 26px; color: var(--accent);
+  word-break: break-all; font-size: 12px; line-height: 1.5;
+}
+.char-count { font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.char-count.over { color: var(--danger); font-weight: 600; }
+
+/* ---------------- 操作条 ---------------- */
+.actions {
+  display: flex; align-items: center; gap: 10px; padding: 13px 18px;
+  border-top: 1px solid var(--border); background: var(--surface-2);
+}
+.actions .spacer { margin-left: auto; }
+.btn {
+  padding: 7px 15px; border-radius: var(--radius-sm); white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--dt-foreground) 22%, transparent);
+  background: var(--surface); cursor: pointer; font-size: 13px; font-weight: 500;
+  transition: background .12s, border-color .12s, color .12s;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.btn.primary:hover { filter: brightness(1.08); color: var(--accent-fg); }
+.btn.ghost { border-color: transparent; background: transparent; color: var(--ink-3); }
+.btn.ghost:hover { color: var(--danger); border-color: transparent; }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.ai {
+  border-style: dashed; color: var(--accent); border-color: color-mix(in srgb, var(--dt-ring) 45%, transparent);
+  background: var(--accent-soft);
+}
+.btn.ai:hover { border-style: solid; }
+.saved-tip { font-size: 12px; color: var(--ok); display: none; align-items: center; gap: 5px; }
+.saved-tip.show { display: flex; }
+
+.note {
+  font-size: 12px; color: var(--ink-3); background: var(--surface-2);
+  border-left: 2px solid var(--border-strong); padding: 8px 12px; border-radius: 0 5px 5px 0;
+  margin-top: 12px;
+}
+.note.warn { border-left-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.kv { display: grid; grid-template-columns: 108px 1fr; gap: 6px 14px; font-size: 13px; }
+.kv dt { color: var(--ink-3); }
+.kv dd { margin: 0; }
+
+/* ---------------- 弹层 ---------------- */
+.modal-back {
+  position: fixed; inset: 0; background: color-mix(in srgb, #000 45%, transparent);
+  display: none; place-items: center; z-index: 50; padding: 24px;
+}
+.modal-back.open { display: grid; }
+
+/* 历史简历候选 */
+.hist-list { display: flex; flex-direction: column; gap: 10px; }
+.hist-card {
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 12px 14px; background: var(--surface-2); cursor: pointer;
+  transition: border-color .12s, box-shadow .12s;
+  display: flex; align-items: center; gap: 13px;
+}
+.hist-card:hover { border-color: var(--dt-ring); box-shadow: var(--shadow); }
+.hist-card[aria-pressed="true"] {
+  border-color: var(--dt-ring);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--dt-ring) 30%, transparent);
+}
+.hist-thumb {
+  width: 46px; height: 58px; flex: 0 0 auto; border-radius: 4px;
+  background: var(--dt-background); border: 1px solid var(--border);
+  overflow: hidden; position: relative;
+}
+.hist-thumb::after {
+  content: "PDF"; position: absolute; bottom: 2px; right: 3px;
+  font-size: 6px; font-weight: 700; color: var(--ink-3);
+}
+.hist-main { flex: 1; min-width: 0; }
+.hist-name { font-size: 13.5px; font-weight: 570; }
+.hist-meta { font-size: 11.5px; color: var(--ink-3); margin-top: 3px; }
+.hist-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.hist-score {
+  flex: 0 0 auto; text-align: right;
+}
+.hist-score .num {
+  font-variant-numeric: tabular-nums; font-weight: 650; font-size: 15px;
+  display: block; line-height: 1.1;
+}
+.hist-score .lbl { font-size: 10.5px; color: var(--ink-3); }
+.hist-best {
+  display: inline-block; font-size: 10px; font-weight: 650; padding: 1px 6px;
+  border-radius: 20px; background: var(--accent); color: var(--accent-fg);
+  margin-left: 6px; vertical-align: 1px;
+}
+.modal-back.open { display: grid; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 20px 60px -20px rgba(0,0,0,.5); width: min(620px, 100%);
+  max-height: 86vh; overflow: auto;
+}
+.modal-head { padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.modal-head h3 { margin: 0; font-size: 15px; font-weight: 620; }
+.modal-body { padding: 18px 20px; }
+.modal-foot { padding: 13px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: var(--surface-2); }
+.step { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 13px; }
+.step + .step { border-top: 1px solid var(--border); }
+.step-num {
+  width: 21px; height: 21px; border-radius: 50%; flex: 0 0 auto;
+  display: grid; place-items: center; font-size: 11px; font-weight: 650;
+  background: var(--surface-2); color: var(--ink-3); border: 1px solid var(--border);
+}
+.step.done .step-num { background: var(--ok-soft); color: var(--ok); border-color: color-mix(in srgb, var(--ok) 34%, transparent); }
+.step.active .step-num { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.step.done .step-t { color: var(--ink-2); }
+.spin { display: inline-block; width: 11px; height: 11px; border: 2px solid color-mix(in srgb, var(--dt-foreground) 25%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } .caret { transition: none; } }
+
+.view { display: none; }
+.view.active { display: block; }
+
+@media (max-width: 880px) {
+  .app { grid-template-columns: 1fr; }
+  .sidebar { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .sidebar .nav-item { width: auto; }
+  .main { padding: 20px; }
+  .form-grid { grid-template-columns: 1fr; }
+  .tpl-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 侧栏 ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">岗</div>
+      <div>
+        <div class="brand-name">好岗好找</div>
+        <div class="brand-sub">Good-job-Ez</div>
+      </div>
+    </div>
+
+    <button class="nav-item" data-view="profile" aria-selected="true"><span class="dot"></span>个人信息</button>
+    <button class="nav-item" data-view="recommend" aria-selected="false"><span class="dot"></span>岗位推荐</button>
+    <button class="nav-item" data-view="template" aria-selected="false"><span class="dot"></span>用户简历</button>
+    <button class="nav-item" data-view="platform" aria-selected="false"><span class="dot"></span>平台接入</button>
+    <button class="nav-item" data-view="report" aria-selected="false"><span class="dot"></span>日报</button>
+
+  </aside>
+
+  <!-- ============ 主区 ============ -->
+  <main class="main">
+
+    <!-- ---------- 个人信息 ---------- -->
+    <section class="view active" id="view-profile">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">个人信息</h1>
+          <p class="page-desc">决定岗位匹配度怎么算，也是简历生成的唯一原料。只存在你本机，不外传。</p>
+        </div>
+      </div>
+
+      <!-- 简历文档上传 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>从简历文档导入</h2>
+          <span class="hint">本地解析，不走大模型</span>
+        </div>
+        <div class="panel-body">
+          <div class="upload-zone" id="upload-zone">
+            <div class="uz-title">拖入或点击选择简历文件</div>
+            <div class="uz-sub">支持 .docx / .pdf / .txt · 解析在本机完成，文件不会离开这台电脑</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
+            <button class="btn primary" id="btn-parse" disabled>识别并填写表单</button>
+            <span class="desc" id="parse-status" style="font-size:12px;color:var(--ink-3)">先选一个文件</span>
+          </div>
+          <div class="note">
+            识别走的是本地规则解析（按段落结构 + 字段关键词抽取），<b>不调用大模型</b>，
+            避免简历内容被发送出去。解析结果只是一份草稿，
+            确认无误后再点「保存」才写入。
+          </div>
+        </div>
+      </div>
+
+      <!-- 身份信息 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>身份信息</h2>
+          <span class="hint">仅用于简历生成表单</span>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <div class="field">
+              <label>证件照</label>
+              <div class="avatar-upload" id="avatar">点击上传<br>照片</div>
+              <div class="desc">2:3 比例，jpg/png。会嵌进简历模板</div>
+            </div>
+            <div class="field">
+              <label>姓名</label>
+              <input type="text" id="f-name" placeholder="张三">
+            </div>
+            <div class="field">
+              <label>电话</label>
+              <input type="text" id="f-phone" placeholder="138****0000">
+            </div>
+            <div class="field">
+              <label>邮箱</label>
+              <input type="text" id="f-email" placeholder="you@example.com">
+            </div>
+            <div class="field">
+              <label>最高学历</label>
+              <select id="f-degree">
+                <option>大专</option><option>本科</option>
+                <option selected>硕士</option><option>博士</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>毕业院校</label>
+              <input type="text" id="f-school" placeholder="XX 大学">
+            </div>
+            <div class="field">
+              <label>专业</label>
+              <input type="text" id="f-major" placeholder="软件工程">
+            </div>
+            <div class="field">
+              <label>毕业时间</label>
+              <input type="text" id="f-grad" placeholder="2024.06">
+            </div>
+          </div>
+          <div class="note">
+            这几项<b>不参与岗位打分</b>，只在生成简历时填进模板的抬头。同样只写本机。
+          </div>
+        </div>
+      </div>
+
+      <!-- 期望条件 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>期望条件</h2>
+          <span class="hint">参与打分</span>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <div class="field span-2">
+              <label>期望城市<span class="opt">（可多选）</span></label>
+              <div class="chips" id="chips-city">
+                <span class="chip">杭州<button data-x>×</button></span>
+                <span class="chip">上海<button data-x>×</button></span>
+                <span class="chip">深圳<button data-x>×</button></span>
+                <button class="chip-add" data-add="chips-city">+ 添加城市</button>
+              </div>
+              <div class="desc">岗位地点命中任一城市即算符合城市项（20 分）</div>
+            </div>
+            <div class="field span-2">
+              <label>岗位方向</label>
+              <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+                <div class="chips" id="chips-title" style="flex:1;min-width:220px;margin-bottom:0">
+                  <span class="chip">前端<button data-x>×</button></span>
+                  <span class="chip">web<button data-x>×</button></span>
+                  <span class="chip">three.js<button data-x>×</button></span>
+                  <span class="chip">交互<button data-x>×</button></span>
+                  <button class="chip-add" data-add="chips-title">+ 添加</button>
+                </div>
+                <button class="btn ai" data-ai="title">✦ AI 根据经历推荐</button>
+              </div>
+              <div class="desc">出现在岗位名里就加分，每命中一个 +10，最多 30 分</div>
+            </div>
+            <div class="field span-2">
+              <label>期望最低月薪<span class="opt">（K）</span></label>
+              <input type="text" id="f-salary" value="15" style="max-width:120px">
+              <div class="desc">0 表示不要求 · 岗位薪资低于此值扣分（20 分项）</div>
+            </div>
+            <div class="field span-2">
+              <label>期望最少年限</label>
+              <input type="text" id="f-years" value="3" style="max-width:120px" disabled>
+              <div class="desc muted">⚠ 暂不纳入评分。字段先留着，等评分模型稳定后再启用。</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 技能 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>我的技能</h2>
+          <span class="hint">参与打分</span>
+        </div>
+        <div class="panel-body">
+          <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+            <div class="chips" id="chips-skills" style="flex:1;min-width:240px;margin-bottom:0">
+              <span class="chip">three.js<button data-x>×</button></span>
+              <span class="chip">vue<button data-x>×</button></span>
+              <span class="chip">typescript<button data-x>×</button></span>
+              <span class="chip">node<button data-x>×</button></span>
+              <span class="chip">javascript<button data-x>×</button></span>
+              <span class="chip">html5<button data-x>×</button></span>
+              <span class="chip">css<button data-x>×</button></span>
+              <span class="chip">webgl<button data-x>×</button></span>
+              <button class="chip-add" data-add="chips-skills">+ 添加</button>
+            </div>
+            <button class="btn ai" data-ai="skills">✦ AI 根据经历推荐</button>
+          </div>
+          <div class="desc" style="font-size:12px;color:var(--ink-2);margin-top:8px">
+            按覆盖率折算 30 分。写了但简历里没有的技能等于给自己送分，所以只写你真会的。
+          </div>
+        </div>
+      </div>
+
+      <!-- 工作经历 -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>真实经历</h2>
+          <span class="hint">简历定向优化的唯一原料</span>
+        </div>
+        <div class="panel-body">
+          <div class="field">
+            <label>按时间倒序写你真做过的事</label>
+            <textarea id="f-exp" rows="9">2022-至今  某公司  前端工程师
+- 负责内部管理后台的前端架构，用 Vue 3 + TypeScript 重构了 12 个页面
+- 用 three.js 做过一个产品展示页，含模型加载、动画时间轴驱动、点击拾取
+- 推动构建提速：webpack 换成 vite，冷启动从 90s 降到 8s
+
+2020-2022  某公司  前端开发
+- 维护 jQuery 时代的活动页，逐步迁移到组件化</textarea>
+            <div class="desc">AI 只能重组这里的文字，不会编造没出现过的内容</div>
+          </div>
+          <div class="note">
+            这段文字同时被三处使用：岗位打分的技能匹配、岗位方向与关键词的 AI 评估、
+            生成简历时的依据来源。写得越具体，后面「优化 XX 岗位的简历」效果越好。
+          </div>
+        </div>
+        <div class="actions">
+          <span class="saved-tip" id="tip-profile">✓ 已保存</span>
+          <span class="spacer"></span>
+          <button class="btn ghost">恢复默认</button>
+          <button class="btn primary" data-save="profile">保存</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 岗位推荐 ---------- -->
+    <section class="view" id="view-recommend">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">岗位推荐</h1>
+          <p class="page-desc">本地打分，不调用大模型。分数 = 职位名 30 + 技能 30 + 城市 20 + 薪资 20</p>
+        </div>
+      </div>
+
+      
+      <div class="panel">
+        <div class="panel-head">
+          <h2>今日候选</h2>
+          <div class="tools">
+            <span class="hint">抓取于 16:41 · 命中 3 / 抓到 30 · 显示前 5 条</span>
+            <button class="btn sm" data-adv="adv-filter">高级</button>
+          </div>
+        </div>
+        <div class="adv-panel" id="adv-filter" style="margin:12px 18px 4px">
+          <div class="adv-title">筛选条件 · 改动立即生效</div>
+          <div class="form-grid">
+            <div class="field span-2">
+              <label>搜索关键词</label>
+              <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+                <div class="chips" id="chips-kw" style="flex:1;min-width:240px;margin-bottom:0">
+                  <span class="chip">前端<button data-x>×</button></span>
+                  <span class="chip">web前端<button data-x>×</button></span>
+                  <span class="chip">three.js<button data-x>×</button></span>
+                  <button class="chip-add" data-add="chips-kw">+ 添加</button>
+                </div>
+                <button class="btn ai" data-ai="kw">✦ AI 根据经历匹配</button>
+              </div>
+              <div class="desc">会在各站按这些词轮询搜索。AI 补的词来自你的工作经历，不是拍脑袋。</div>
+            </div>
+            <div class="field">
+              <label>推送分数线</label>
+              <input type="number" id="f-minscore" value="50">
+              <div class="desc">低于这个分不进日报，也不推送</div>
+            </div>
+            <div class="field">
+              <label>单次最多抓取</label>
+              <input type="number" id="f-maxjobs" value="30">
+              <div class="desc">条</div>
+            </div>
+            <div class="field">
+              <label>请求间隔<span class="opt">（秒）</span></label>
+              <input type="number" id="f-gap" value="12">
+              <div class="desc">基准值，实际间隔 = 基准 + 0~20 秒随机。调小会触发风控</div>
+            </div>
+            <div class="field">
+              <label>每天抓取次数</label>
+              <input type="number" id="f-rounds" value="4">
+              <div class="desc">次 / 天</div>
+            </div>
+          </div>
+        </div>
+      
+        </div>
+        <div class="panel-body tight">
+
+          <div class="job-list">
+
+            <!-- 岗位 1 -->
+            <div class="job-card open">
+              <div class="job-row">
+                <span class="caret">▶</span>
+                <div class="job-main">
+                  <div class="job-title">web前端工程师</div>
+                  <div class="job-sub">杭州某某科技有限公司</div>
+                  <div class="job-meta">
+                    <span>💰 1.5-1.8万</span>
+                    <span>📍 杭州 拱墅 祥符</span>
+                    <span>🎓 本科</span>
+                    <span>💼 3-5年</span>
+                  </div>
+                </div>
+                <div class="job-side"><span class="score hi">73</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 杭州某某科技">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 杭州某某科技">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-detail">
+                <div class="tag-label">职位名命中（+30）</div>
+                <div class="tagline">
+                  <span class="tag">前端</span><span class="tag">web</span><span class="tag">three.js</span>
+                </div>
+                <div class="tag-label">技能覆盖 5/8（+19）</div>
+                <div class="tagline">
+                  <span class="tag">three.js</span><span class="tag">javascript</span>
+                  <span class="tag">html5</span><span class="tag">css</span><span class="tag">webgl</span>
+                  <span class="tag miss">vue</span><span class="tag miss">typescript</span><span class="tag miss">node</span>
+                </div>
+                <div class="tag-label">城市符合 杭州（+20）</div>
+                <div class="tag-label">薪资 1.5-1.8万 ≥ 期望 15K（+4）</div>
+                <div class="detail-note">
+                  缺口：JD 没提 vue / typescript / node。
+                  优化简历时可把你项目里的 Vue 经验提到前面，命中率会更高。
+                </div>
+                <div class="job-actions"><button class="btn sm">查看 JD 全文</button></div>
+              </div>
+            </div>
+
+            <!-- 岗位 2 -->
+            <div class="job-card">
+              <div class="job-row">
+                <span class="caret">▶</span>
+                <div class="job-main">
+                  <div class="job-title">web前端工程师</div>
+                  <div class="job-sub">某人力资源有限公司</div>
+                  <div class="job-meta">
+                    <span>💰 面议</span>
+                    <span>📍 杭州 钱塘 下沙</span>
+                    <span>🎓 不限</span>
+                    <span>💼 1-3年</span>
+                  </div>
+                </div>
+                <div class="job-side"><span class="score mid">63</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某人力资源">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某人力资源">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-detail">
+                <div class="tag-label">职位名命中（+20）</div>
+                <div class="tagline"><span class="tag">前端</span><span class="tag">web</span></div>
+                <div class="tag-label">技能覆盖 5/8（+19）</div>
+                <div class="tagline">
+                  <span class="tag">vue</span><span class="tag">node</span><span class="tag">javascript</span>
+                  <span class="tag">css</span><span class="tag">webgl</span>
+                  <span class="tag miss">three.js</span><span class="tag miss">typescript</span><span class="tag miss">html5</span>
+                </div>
+                <div class="tag-label">城市符合 杭州（+20）</div>
+                <div class="tag-label">薪资 面议（+4）</div>
+                <div class="detail-note">
+                  这家是人力资源公司代招，福利写得很具体，可以先问清楚。
+                </div>
+                <div class="job-actions"><button class="btn sm">查看 JD 全文</button></div>
+              </div>
+            </div>
+
+            <!-- 岗位 3 -->
+            <div class="job-card">
+              <div class="job-row">
+                <span class="caret">▶</span>
+                <div class="job-main">
+                  <div class="job-title">web前端开发工程师</div>
+                  <div class="job-sub">某网络科技有限公司</div>
+                  <div class="job-meta">
+                    <span>💰 面议</span>
+                    <span>📍 杭州 余杭 五常</span>
+                    <span>🎓 大专</span>
+                    <span>💼 3-5年</span>
+                  </div>
+                </div>
+                <div class="job-side"><span class="score mid">60</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端开发工程师 / 某网络科技">简历匹配优化</button><button class="btn sm" data-apply="web前端开发工程师 / 某网络科技">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-detail">
+                <div class="tag-label">职位名命中（+20）</div>
+                <div class="tagline"><span class="tag">前端</span><span class="tag">web</span></div>
+                <div class="tag-label">技能覆盖 4/8（+15）</div>
+                <div class="tagline">
+                  <span class="tag">vue</span><span class="tag">javascript</span>
+                  <span class="tag">html5</span><span class="tag">css</span>
+                  <span class="tag miss">three.js</span><span class="tag miss">typescript</span>
+                  <span class="tag miss">node</span><span class="tag miss">webgl</span>
+                </div>
+                <div class="tag-label">城市符合 杭州（+20）</div>
+                <div class="tag-label">薪资 面议（+5）</div>
+                <div class="detail-note">
+                  外包岗。设置里勾了「跳过外包 / 劳务派遣」的话，这条会被自动过滤。
+                </div>
+                <div class="job-actions"><button class="btn sm">查看 JD 全文</button></div>
+              </div>
+            </div>
+
+            <!-- 岗位 4 -->
+            <div class="job-card">
+              <div class="job-row">
+                <span class="caret">▶</span>
+                <div class="job-main">
+                  <div class="job-title">前端开发/五险一金+早九晚五</div>
+                  <div class="job-sub">某人力资源有限公司</div>
+                  <div class="job-meta">
+                    <span>💰 面议</span>
+                    <span>📍 杭州 上城 四季青</span>
+                    <span>🎓 不限</span>
+                    <span>💼 1-3年</span>
+                  </div>
+                </div>
+                <div class="job-side"><span class="score low">35</span><div class="job-btns"><button class="btn sm" data-opt="前端开发/五险一金+早九晚五">简历匹配优化</button><button class="btn sm" data-apply="前端开发/五险一金+早九晚五">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-detail">
+                <div class="tag-label">职位名命中（+10）</div>
+                <div class="tagline"><span class="tag">前端</span></div>
+                <div class="tag-label">技能覆盖 2/8（+8）</div>
+                <div class="tagline">
+                  <span class="tag">vue</span><span class="tag">html5</span>
+                  <span class="tag miss">three.js</span><span class="tag miss">typescript</span>
+                  <span class="tag miss">node</span><span class="tag miss">javascript</span>
+                  <span class="tag miss">css</span><span class="tag miss">webgl</span>
+                </div>
+                <div class="tag-label">城市符合 杭州（+20）</div>
+                <div class="detail-note">低于分数线 50，不会进日报。</div>
+              </div>
+            </div>
+
+            <!-- 岗位 5 -->
+            <div class="job-card">
+              <div class="job-row">
+                <span class="caret">▶</span>
+                <div class="job-main">
+                  <div class="job-title">全栈开发工程师</div>
+                  <div class="job-sub">杭州某某科技有限公司</div>
+                  <div class="job-meta">
+                    <span>💰 面议</span>
+                    <span>📍 杭州 滨江</span>
+                    <span>🎓 本科</span>
+                    <span>💼 3-5年</span>
+                  </div>
+                </div>
+                <div class="job-side"><span class="score low">20</span><div class="job-btns"><button class="btn sm" data-opt="全栈开发工程师">简历匹配优化</button><button class="btn sm" data-apply="全栈开发工程师">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-detail">
+                <div class="tag-label">职位名命中（+0）</div>
+                <div class="tagline"><span class="tag miss">前端</span></div>
+                <div class="tag-label">技能覆盖 0/8（+0）</div>
+                <div class="tagline">
+                  <span class="tag miss">three.js</span><span class="tag miss">vue</span>
+                  <span class="tag miss">typescript</span><span class="tag miss">node</span>
+                  <span class="tag miss">javascript</span><span class="tag miss">html5</span>
+                  <span class="tag miss">css</span><span class="tag miss">webgl</span>
+                </div>
+                <div class="tag-label">城市符合 杭州（+20）</div>
+                <div class="detail-note">方向不匹配，但如果你想转全栈可以留意。</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="actions">
+          <span style="font-size:12px;color:var(--ink-3)">共 54 条在库 · 已推送 8 条</span>
+          <span class="spacer"></span>
+          <button class="btn">立即抓一次</button>
+          <button class="btn primary">按新条件重算</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 用户简历 ---------- -->
+    <section class="view" id="view-template">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">用户简历</h1>
+          <p class="page-desc">上面是能用的简历模板，下面是你自己的简历档案。投递成功的简历会自动存进这里并打标签。</p>
+        </div>
+      </div>
+
+      <!-- ============ 一、简历模板 ============ -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>简历模板</h2>
+          <div class="tools">
+            <span class="hint" id="tpl-hint">已选 2 套</span>
+            <button class="help-btn" data-help="help-tpl" aria-expanded="false"
+                    title="上传模板说明">?</button>
+          </div>
+        </div>
+        <div class="help-pop" id="help-tpl">
+          <b>上传自己的模板</b>：点模板库右下角的「＋ 上传模板」格子，选一个
+          <b>Word（.docx）</b>、<b>PDF</b> 或<b>图片（.png / .jpg）</b>，再点「转换并加入模板库」。
+          <br>转换在<b>本机完成</b>，文件不会离开这台电脑。Word 走版式参数抽取，
+          PDF 和图片按视觉还原成「底图 + 文字层」。
+          <span class="warn-line">图片模板会把原图当底图，还原度取决于图片清晰度，建议优先用 Word。</span>
+        </div>
+        <div class="panel-body">
+          <div class="tpl-grid" id="tpl-grid">
+
+            <div class="tpl-card" data-tpl="classic" aria-pressed="true" tabindex="0">
+              <div class="tpl-badge">默认</div>
+              <div class="tpl-check">✓</div>
+              <div class="tpl-thumb">
+                <div class="mini">
+                  <div class="m-name">张三</div>
+                  <div class="m-sub">前端工程师 · 杭州 · 138****0000</div>
+                  <div class="m-bar"></div>
+                  <div class="m-sec">工作经历</div>
+                  <div class="m-line w80"></div><div class="m-line w60"></div>
+                  <div class="m-sec">专业技能</div>
+                  <div class="m-line w80"></div><div class="m-line w45"></div>
+                  <div class="m-sec">教育背景</div>
+                  <div class="m-line w60"></div>
+                </div>
+              </div>
+              <div class="tpl-info">
+                <div class="tpl-name">经典单栏</div>
+                <div class="tpl-desc">通用性最强，HR 都看得惯</div>
+              </div>
+            </div>
+
+            <div class="tpl-card" data-tpl="modern" aria-pressed="true" tabindex="0">
+              <div class="tpl-check">✓</div>
+              <div class="tpl-thumb">
+                <div class="mini two">
+                  <div class="m-side">
+                    <div class="m-name">张三</div>
+                    <div class="m-sub">前端工程师</div>
+                    <div class="m-bar"></div>
+                    <div class="m-sec">技能</div>
+                    <div class="m-line"></div><div class="m-line w80"></div>
+                    <div class="m-line w60"></div><div class="m-line w80"></div>
+                    <div class="m-sec">教育</div>
+                    <div class="m-line w80"></div><div class="m-line w45"></div>
+                  </div>
+                  <div>
+                    <div class="m-sec">工作经历</div>
+                    <div class="m-line w80"></div><div class="m-line w60"></div>
+                    <div class="m-line w80"></div>
+                    <div class="m-sec">项目</div>
+                    <div class="m-line w80"></div><div class="m-line w45"></div>
+                    <div class="m-sec">荣誉</div>
+                    <div class="m-line w60"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="tpl-info">
+                <div class="tpl-name">现代双栏</div>
+                <div class="tpl-desc">技能多的岗位适合，视觉清爽</div>
+              </div>
+            </div>
+
+            <div class="tpl-card" data-tpl="tech" aria-pressed="false" tabindex="0">
+              <div class="tpl-check">✓</div>
+              <div class="tpl-thumb">
+                <div class="mini tech">
+                  <div class="m-name">张三 / Frontend Engineer</div>
+                  <div class="m-sub">github.com · email · 杭州</div>
+                  <div class="m-bar" style="background:var(--ink)"></div>
+                  <div class="m-sec">EXPERIENCE</div>
+                  <div class="m-line w80"></div><div class="m-line w60"></div>
+                  <div class="m-sec">STACK</div>
+                  <div class="m-line w80"></div><div class="m-line w45"></div>
+                  <div class="m-sec">EDUCATION</div>
+                  <div class="m-line w60"></div>
+                </div>
+              </div>
+              <div class="tpl-info">
+                <div class="tpl-name">技术极客</div>
+                <div class="tpl-desc">极客风，适合技术岗投递</div>
+              </div>
+            </div>
+
+            <div class="tpl-card" data-tpl="acad" aria-pressed="false" tabindex="0">
+              <div class="tpl-check">✓</div>
+              <div class="tpl-thumb">
+                <div class="mini acad">
+                  <div style="text-align:center">
+                    <div class="m-name">张三</div>
+                    <div class="m-sub">XX 大学 · 软件工程 · 硕士</div>
+                  </div>
+                  <div class="m-bar" style="background:transparent;height:1px"></div>
+                  <div class="m-sec" style="text-align:center">主要经历</div>
+                  <div class="m-line w80"></div><div class="m-line w60"></div>
+                  <div class="m-sec" style="text-align:center">研究与项目</div>
+                  <div class="m-line w80"></div><div class="m-line w45"></div>
+                </div>
+              </div>
+              <div class="tpl-info">
+                <div class="tpl-name">学术风</div>
+                <div class="tpl-desc">衬线排版，适合研究院 / 外企</div>
+              </div>
+            </div>
+
+            <!-- 自定义模板位（上传后出现） -->
+            <div class="tpl-card tpl-upload" id="tpl-upload-slot" aria-pressed="false" tabindex="0">
+              <div class="tpl-check">✓</div>
+              <div class="tpl-thumb" style="display:grid;place-items:center;text-align:center;padding:12px">
+                <div>
+                  <div style="font-size:20px;opacity:.5;margin-bottom:4px">＋</div>
+                  <div style="font-size:11px;color:var(--ink-3);line-height:1.5">
+                    上传模板<br>加入模板库
+                  </div>
+                </div>
+              </div>
+              <div class="tpl-info">
+                <div class="tpl-name" style="color:var(--accent)">自定义模板</div>
+                <div class="tpl-desc">Word / PDF / 图片</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="actions">
+          <span class="saved-tip" id="tip-template">✓ 已保存</span>
+          <span class="spacer"></span>
+          <button class="btn">预览完整效果</button>
+          <button class="btn" id="btn-tpl-parse" disabled>转换并加入模板库</button>
+          <button class="btn primary" data-save="template">保存</button>
+        </div>
+      </div>
+
+      <!-- 智能选模板 -->
+      <div class="panel">
+        <div class="panel-head"><h2>智能选模板</h2></div>
+        <div class="panel-body" style="padding-top:4px">
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">由 Agent 按 JD 自行推荐模板</div>
+              <div class="switch-desc">
+                开启后，生成简历时会先读一遍 JD，再挑最合适的版式：
+                要求简洁就选经典单栏，技能项多就选现代双栏，看重技术深度就选技术极客。
+                你随时能在生成结果里手动换回去。
+              </div>
+            </div>
+            <button class="toggle" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">只在你勾选的模板里挑</div>
+              <div class="switch-desc">
+                勾上后，Agent 只能从上面选中的模板里推荐（可多选）。
+                一个都没勾时，它会在全部模板里自己选。
+              </div>
+            </div>
+            <button class="toggle" role="switch" aria-checked="true"></button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 二、用户简历 ============ -->
+      <div class="panel">
+        <div class="panel-head">
+          <h2>用户简历</h2>
+          <span class="hint">投递成功的简历会自动存这里 · 共 4 份</span>
+        </div>
+        <div class="panel-body tight">
+          <div class="resume-list" id="resume-list">
+
+            <div class="resume-item">
+              <div class="resume-thumb"><div class="mini"><div class="m-name"></div><div class="m-line w80"></div><div class="m-line w60"></div></div></div>
+              <div class="resume-main">
+                <div class="resume-name">前端工程师简历_2026-10.pdf</div>
+                <div class="resume-meta">2026-10-24 · 模板「经典单栏」 · 投递 3 家 · 1 家回复</div>
+                <div class="hist-tags">
+                  <span class="tag">three.js</span><span class="tag">vue</span>
+                  <span class="tag">性能优化</span><span class="tag">可视化</span>
+                </div>
+              </div>
+              <div class="resume-actions">
+                <button class="btn sm">预览</button>
+                <button class="btn sm">下载</button>
+                <button class="btn sm">设为默认</button>
+              </div>
+            </div>
+
+            <div class="resume-item">
+              <div class="resume-thumb"><div class="mini two"><div class="m-side"><div class="m-line"></div><div class="m-line w60"></div></div><div><div class="m-line w80"></div><div class="m-line w60"></div></div></div></div>
+              <div class="resume-main">
+                <div class="resume-name">全栈开发简历_2026-08.pdf</div>
+                <div class="resume-meta">2026-08-11 · 模板「现代双栏」 · 投递 1 家 · 0 家回复</div>
+                <div class="hist-tags">
+                  <span class="tag">node</span><span class="tag">vue</span><span class="tag">typescript</span>
+                </div>
+              </div>
+              <div class="resume-actions">
+                <button class="btn sm">预览</button>
+                <button class="btn sm">下载</button>
+                <button class="btn sm">设为默认</button>
+              </div>
+            </div>
+
+            <div class="resume-item">
+              <div class="resume-thumb"><div class="mini"><div class="m-name"></div><div class="m-line w80"></div><div class="m-line w60"></div></div></div>
+              <div class="resume-main">
+                <div class="resume-name">前端简历_2026-05.pdf</div>
+                <div class="resume-meta">2026-05-20 · 模板「经典单栏」 · 投递 8 家 · 1 家回复</div>
+                <div class="hist-tags">
+                  <span class="tag">javascript</span><span class="tag">html5</span><span class="tag">css</span>
+                </div>
+              </div>
+              <div class="resume-actions">
+                <button class="btn sm">预览</button>
+                <button class="btn sm">下载</button>
+                <button class="btn sm">设为默认</button>
+              </div>
+            </div>
+
+            <div class="resume-item">
+              <div class="resume-thumb"><div class="mini"><div class="m-line w60"></div><div class="m-line w80"></div></div></div>
+              <div class="resume-main">
+                <div class="resume-name">应届生简历_2026-03.pdf</div>
+                <div class="resume-meta">2026-03-02 · 模板「学术风」 · 投递 4 家 · 0 家回复</div>
+                <div class="hist-tags">
+                  <span class="tag">javascript</span><span class="tag">css</span>
+                </div>
+              </div>
+              <div class="resume-actions">
+                <button class="btn sm">预览</button>
+                <button class="btn sm">下载</button>
+                <button class="btn sm">设为默认</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+        <div class="actions">
+          <span style="font-size:12px;color:var(--ink-3)">
+            简历标签来自岗位方向 + 命中技能，投递时自动打标，用作后续岗位的简历评分依据
+          </span>
+          <span class="spacer"></span>
+          <button class="btn">导出全部</button>
+          <button class="btn primary">上传简历</button>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- ---------- 平台接入 ---------- -->
+    <section class="view" id="view-platform">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">平台接入</h1>
+          <p class="page-desc">全部复用你浏览器里的登录态，不存密码、不偷 Cookie。每个平台的风控设置在各自的「高级」里。</p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>登录态体检</h2>
+          <span class="hint">读 139 个 cookie · Chrome 9222</span>
+        </div>
+        <div class="panel-body">
+          <div class="status-line ok">
+            <span>✓</span>
+            <span class="msg">两个站登录态都正常。BOSS 的风控凭证 <code class="cred">__zp_stoken__</code> 寿命只有 3 天，<b>过期后在浏览器搜一次即可续期，不需要重新登录</b>。</span>
+            <span class="spacer"></span>
+            <button class="btn" style="padding:3px 10px;font-size:12px">重新体检</button>
+          </div>
+        </div>
+
+        <div class="panel-body tight" style="border-top:1px solid var(--border)">
+
+          <div class="platform">
+            <div class="platform-row">
+              <div class="platform-logo" style="background:#00B4B4">BOSS</div>
+              <div class="platform-main">
+                <div class="platform-name">BOSS直聘 <span class="pill ok">已连接</span></div>
+                <div class="platform-meta">
+                  <code class="cred">zp_at</code> 登录凭证 · 约 12 天
+                  <code class="cred">__zp_stoken__</code> 风控 · 寿命 3 天
+                </div>
+              </div>
+              <button class="btn" data-toggle="zhipin" aria-pressed="true">已启用</button>
+              <button class="btn sm" data-adv="adv-boss">高级</button>
+            </div>
+            <div class="adv-panel" id="adv-boss">
+              <div class="adv-title">BOSS直聘 · 风控与安全</div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">允许投递简历</div>
+                  <div class="switch-desc">关闭时插件只读。开启后仍需你对每条岗位点头确认</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">每日打招呼上限</div>
+                  <div class="switch-desc">BOSS 有次数限制，超了会被限流</div>
+                </div>
+                <input type="number" value="10" style="width:78px;padding:5px 9px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:6px">
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">跳过「外包 / 劳务派遣」岗位</div>
+                  <div class="switch-desc">命中直接不抓，不入库</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true"></button>
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">遇到风控时自动降速</div>
+                  <div class="switch-desc">检测到 code 37 就把请求间隔拉长到 60 秒，并通知你</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true"></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="platform">
+            <div class="platform-row">
+              <div class="platform-logo" style="background:#E4361E">智联</div>
+              <div class="platform-main">
+                <div class="platform-name">智联招聘 <span class="pill ok">已连接</span></div>
+                <div class="platform-meta">
+                  <code class="cred">at</code> 登录凭证 · 约 7 天
+                  <code class="cred">rt</code> 刷新凭证 · 约 30 天
+                </div>
+              </div>
+              <button class="btn" data-toggle="zhaopin" aria-pressed="true">已启用</button>
+              <button class="btn sm" data-adv="adv-zhaopin">高级</button>
+            </div>
+            <div class="adv-panel" id="adv-zhaopin">
+              <div class="adv-title">智联招聘 · 风控与安全</div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">允许投递简历</div>
+                  <div class="switch-desc">关闭时插件只读。开启后仍需你对每条岗位点头确认</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">每日投递上限</div>
+                  <div class="switch-desc">单账号每日可投递的岗位数</div>
+                </div>
+                <input type="number" value="15" style="width:78px;padding:5px 9px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:6px">
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">跳过「外包 / 劳务派遣」岗位</div>
+                  <div class="switch-desc">命中直接不抓，不入库</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true"></button>
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">抓取详情页</div>
+                  <div class="switch-desc">关掉只抓列表（快 3 倍），但没有完整 JD，简历优化会变差</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true"></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="platform">
+            <div class="platform-row">
+              <div class="platform-logo" style="background:#0A5CA8">汇博</div>
+              <div class="platform-main">
+                <div class="platform-name">汇博招聘网 <span class="pill off">未启用</span></div>
+                <div class="platform-meta">DOM 抓取，适配器未开发</div>
+              </div>
+              <button class="btn" data-toggle="huibo" aria-pressed="false">启用</button>
+              <button class="btn sm" data-adv="adv-huibo">高级</button>
+            </div>
+            <div class="adv-panel" id="adv-huibo">
+              <div class="adv-title">汇博招聘网 · 风控与安全</div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">允许投递简历</div>
+                  <div class="switch-desc">关闭时插件只读</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="false"></button>
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">每日投递上限</div>
+                  <div class="switch-desc">条</div>
+                </div>
+                <input type="number" value="10" style="width:78px;padding:5px 9px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:6px">
+              </div>
+              <div class="switch">
+                <div class="switch-main">
+                  <div class="switch-title">跳过「外包 / 劳务派遣」岗位</div>
+                  <div class="switch-desc">命中直接不抓，不入库</div>
+                </div>
+                <button class="toggle" role="switch" aria-checked="true"></button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="actions">
+          <span style="font-size:12px;color:var(--ink-3)">
+            浏览器地址 <code>127.0.0.1:9222</code> · profile <code>&lt;你的 Chrome profile 路径&gt;</code>
+          </span>
+          <span class="spacer"></span>
+          <button class="btn">打开登录页</button>
+          <button class="btn primary">保存</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h2>全局控制</h2></div>
+        <div class="panel-body" style="padding-top:4px">
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">PAUSE 总闸</div>
+              <div class="switch-desc">立刻停止一切抓取，手动模式下建一个 PAUSE 文件即可，不用开界面</div>
+            </div>
+            <button class="btn" style="padding:5px 12px;font-size:12px">创建 PAUSE</button>
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">暂缓接入的平台</div>
+              <div class="switch-desc">
+                广西人才网、重庆人社暂不接入 —— 适配器未开发，开了也是空跑。
+              </div>
+            </div>
+            <span class="pill off">2 个待开发</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 日报 ---------- -->
+    <section class="view" id="view-report">
+      <div class="page-head">
+        <div>
+          <h1 class="page-title">日报</h1>
+          <p class="page-desc">每天一份 Markdown 存档；推送只发精简摘要，正文在文件里。</p>
+        </div>
+      </div>
+
+      
+      
+                      <div class="panel">
+        <div class="panel-head">
+          <h2>今日日报</h2>
+          <span class="hint">2026-10-26.md · plugin-data/job-radar/reports/</span>
+        </div>
+        <div class="panel-body">
+          <div class="report-preview">
+            <h3>岗位日报 · 2026-10-26</h3>
+            <div class="rp-meta">高分岗位（≥50 分）：3 条 ｜ 今日新增：2 条 ｜ 在库 54 条</div>
+
+            <div class="rp-item">
+              <div class="rp-title">1. web前端工程师 — 杭州某某科技有限公司</div>
+              <div class="rp-why">匹配度 73 — 职位名命中: 前端、web、three.js；技能覆盖 5/8: three.js、javascript、html5、css、webgl；城市符合: 杭州 拱墅 祥符</div>
+              <div class="rp-gap">缺口 技能未提及: vue、typescript、node</div>
+            </div>
+
+            <div class="rp-item">
+              <div class="rp-title">2. web前端工程师 — 某人力资源有限公司</div>
+              <div class="rp-why">匹配度 63 — 职位名命中: 前端、web；技能覆盖 5/8: vue、node、javascript、css、webgl；城市符合: 杭州 钱塘 下沙</div>
+              <div class="rp-gap">缺口 技能未提及: three.js、typescript、html5</div>
+            </div>
+
+            <div class="rp-item">
+              <div class="rp-title">3. web前端开发工程师 — 某网络科技有限公司</div>
+              <div class="rp-why">匹配度 60 — 职位名命中: 前端、web；技能覆盖 4/8: vue、javascript、html5、css；城市符合: 杭州 余杭 五常</div>
+              <div class="rp-gap">缺口 技能未提及: three.js、typescript、node、webgl</div>
+            </div>
+
+            <div class="rp-item">
+              <div class="rp-title">最近几次抓取</div>
+              <div class="rp-why">06:41 抓到 30 · 命中 3 · 新增 2<br>00:54 抓到 30 · 命中 10 · 新增 0</div>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn">打开日报文件夹</button>
+          <span class="spacer"></span>
+          <button class="btn">重新生成今日日报</button>
+          <button class="btn primary">保存</button>
+        </div>
+      </div>
+<div class="panel">
+        <div class="panel-head">
+          <h2>推送内容</h2>
+          <div class="tools">
+            <span class="hint">每条 = 一份岗位，名称 + 城市 + 链接</span>
+            <button class="btn sm" data-adv="adv-daily">高级</button>
+          </div>
+        </div>
+        <div class="adv-panel" id="adv-daily" style="margin:12px 18px 4px">
+          <div class="adv-title">定时与推送 · 详细设置</div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">自动抓取并推送</div>
+              <div class="switch-desc">当前：每 6 小时 · 下次 13:02</div>
+            </div>
+            <button class="toggle" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">只推当天新岗位</div>
+              <div class="switch-desc">老岗位不重复推。关掉则每次推最高分的几条</div>
+            </div>
+            <button class="toggle" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">每次最多推几条</div>
+              <div class="switch-desc">条</div>
+            </div>
+            <input type="number" value="3" style="width:78px;padding:5px 9px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:6px">
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">失败也通知</div>
+              <div class="switch-desc">抓不到数据时告诉你原因，而不是静默</div>
+            </div>
+            <button class="toggle" role="switch" aria-checked="true"></button>
+          </div>
+          <div class="switch">
+            <div class="switch-main">
+              <div class="switch-title">抓取时段</div>
+              <div class="switch-desc">只在这些小时内跑，避开深夜</div>
+            </div>
+            <input type="text" value="09:00 - 22:00" style="width:130px;padding:5px 9px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:6px">
+          </div>
+        </div>
+        <div class="panel-body">
+          <div class="chat-preview">
+            <div class="bubble"><span class="n">1</span>web前端工程师 · 杭州拱墅
+<span class="u">https://www.zhaopin.com/jobdetail/CC3985.htm</span></div>
+            <div class="bubble"><span class="n">2</span>web前端工程师 · 杭州钱塘
+<span class="u">https://www.zhaopin.com/jobdetail/CC4127.htm</span></div>
+            <div class="bubble"><span class="n">3</span>web前端开发工程师 · 杭州余杭
+<span class="u">https://www.zhaopin.com/jobdetail/CC4301.htm</span></div>
+          </div>
+          <div class="note">
+            一条岗位一条消息，<b>不带分数、不带命中理由</b> —— 想看细节点链接，
+            或在日报文件里看。链接不计入 50 字限制。
+            <span class="char-count" id="cc" style="margin-left:6px"></span>
+          </div>
+        </div>
+      </div>
+</section>
+
+  </main>
+</div>
+
+<!-- ============ 简历优化弹层 ============ -->
+<div class="modal-back" id="modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">优化简历</h3>
+      <span style="margin-left:auto"></span>
+      <button class="btn ghost sm" id="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="step" id="s1">
+        <span class="step-num">1</span>
+        <div style="flex:1">
+          <div class="step-t">读取该岗位的 JD 全文</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">从你已登录的浏览器里取，不额外登录</div>
+        </div>
+      </div>
+      <div class="step" id="s2">
+        <span class="step-num">2</span>
+        <div style="flex:1">
+          <div class="step-t">挑出 JD 里的核心要求</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">技能、学历、年限、关键词</div>
+        </div>
+      </div>
+      <div class="step" id="s3">
+        <span class="step-num">3</span>
+        <div style="flex:1">
+          <div class="step-t">对照你的经历，标出能写进简历的点</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px">只重组你写过的内容，不编造没出现过的经历</div>
+        </div>
+      </div>
+      <div class="step" id="s4">
+        <span class="step-num">4</span>
+        <div style="flex:1">
+          <div class="step-t">按模板生成简历</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:2px" id="s4-sub">使用「经典单栏」模板</div>
+        </div>
+      </div>
+      <div class="note" id="modal-note">
+        生成结果会先给你预览，确认后才保存或导出。
+        投递仍然是另一道手动确认，不会自动投出去。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="modal-cancel">取消</button>
+      <span style="margin-left:auto"></span>
+      <button class="btn primary" id="modal-run">开始优化</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 历史简历推荐弹层 ============ -->
+<div class="modal-back" id="modal-hist">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="hist-title">选择要投递的简历</h3>
+      <span style="margin-left:auto"></span>
+      <button class="btn ghost sm" id="hist-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="status-line warn" style="margin-bottom:14px">
+        <span>!</span>
+        <span class="msg">
+          这个岗位<b>还没做过简历匹配优化</b>。下面按历史简历对该岗位的<b>匹配度排序</b>，
+          选一份投递 —— 想针对这个岗位改内容，点「取消」后去点「简历匹配优化」。
+        </span>
+      </div>
+      <div class="hist-list" id="hist-list"></div>
+      <div class="note">
+        投递成功后会把用掉的这份简历存进<b>用户简历</b>模块，存成 PDF 并打上岗位标签，
+        下次遇到类似岗位时就能直接复用。
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="hist-cancel">取消</button>
+      <span style="margin-left:auto"></span>
+      <button class="btn primary" id="hist-apply" disabled>用这份投递</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 导航（hash 路由）
+// ============================================================
+function showView(name) {
+  const btn = document.querySelector('.nav-item[data-view="' + name + '"]');
+  if (!btn) return;
+  document.querySelectorAll('.nav-item').forEach(b => b.setAttribute('aria-selected', String(b === btn)));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+}
+document.querySelectorAll('.nav-item').forEach(btn => {
+  btn.addEventListener('click', () => showView(btn.dataset.view));
+});
+window.addEventListener('hashchange', () => showView(location.hash.slice(1) || 'profile'));
+if (location.hash.slice(1)) showView(location.hash.slice(1));
+
+// ============================================================
+// 主题：只跟随 Hermes，界面不提供选择器。
+// 独立打开（非桌面端）时用 ?skin=&mode= 预览某套皮肤，仅调试用。
+// ============================================================
+const HERMES_THEMES = {"github":{"colors":{"background":"#ffffff","foreground":"#1f2328","card":"#f6f8fa","cardForeground":"#1f2328","muted":"#f6f6f6","mutedForeground":"#656d76","popover":"#ffffff","popoverForeground":"#1f2328","primary":"#196d31","primaryForeground":"#ffffff","secondary":"#dfebe2","secondaryForeground":"#1f2328","accent":"#e3ede6","accentForeground":"#1f2328","border":"#d0d7de","input":"#ffffff","ring":"#196d31","midground":"#196d31","midgroundForeground":"#ffffff","composerRing":"#196d31","destructive":"#cf222e","destructiveForeground":"#ffffff","sidebarBackground":"#f6f8fa","sidebarBorder":"#d0d7de","userBubble":"#dbe7e2","userBubbleBorder":"#d0d7de"},"darkColors":{"background":"#0d1117","foreground":"#e6edf3","card":"#010409","cardForeground":"#e6edf3","muted":"#1a1e24","mutedForeground":"#7d8590","popover":"#161b22","popoverForeground":"#e6edf3","primary":"#4f9e5e","primaryForeground":"#ffffff","secondary":"#1f382b","secondaryForeground":"#e6edf3","accent":"#192a24","accentForeground":"#e6edf3","border":"#30363d","input":"#0d1117","ring":"#4f9e5e","midground":"#4f9e5e","midgroundForeground":"#ffffff","composerRing":"#4f9e5e","destructive":"#f85149","destructiveForeground":"#ffffff","sidebarBackground":"#010409","sidebarBorder":"#30363d","userBubble":"#0f2018","userBubbleBorder":"#30363d"}},"nous":{"colors":{"background":"#ffffff","foreground":"#1f2328","card":"#f6f8fa","cardForeground":"#1f2328","muted":"#f6f6f6","mutedForeground":"#656d76","popover":"#ffffff","popoverForeground":"#1f2328","primary":"#0053fd","primaryForeground":"#ffffff","secondary":"#deeaff","secondaryForeground":"#1f2328","accent":"#e3edff","accentForeground":"#1f2328","border":"#d0d7de","input":"#ffffff","ring":"#0053fd","midground":"#0053fd","midgroundForeground":"#ffffff","composerRing":"#0053fd","destructive":"#cf222e","destructiveForeground":"#ffffff","sidebarBackground":"#f6f8fa","sidebarBorder":"#d0d7de","userBubble":"#dae7fd","userBubbleBorder":"#d0d7de"},"darkColors":{"background":"#0d1117","foreground":"#e6edf3","card":"#010409","cardForeground":"#e6edf3","muted":"#1a1e24","mutedForeground":"#7d8590","popover":"#161b22","popoverForeground":"#e6edf3","primary":"#4a84fe","primaryForeground":"#161616","secondary":"#1d2e4f","secondaryForeground":"#e6edf3","accent":"#17243a","accentForeground":"#e6edf3","border":"#30363d","input":"#0d1117","ring":"#4a84fe","midground":"#4a84fe","midgroundForeground":"#161616","composerRing":"#4a84fe","destructive":"#f85149","destructiveForeground":"#ffffff","sidebarBackground":"#010409","sidebarBorder":"#30363d","userBubble":"#07162c","userBubbleBorder":"#30363d"}},"catppuccin":{"colors":{"background":"#eff1f5","foreground":"#4c4f69","card":"#e6e9ef","cardForeground":"#4c4f69","muted":"#e8ebef","mutedForeground":"#4c4f69","popover":"#e6e9ef","popoverForeground":"#4c4f69","primary":"#6d2ebf","primaryForeground":"#ffffff","secondary":"#ddd6ed","secondaryForeground":"#4c4f69","accent":"#dfdaef","accentForeground":"#4c4f69","border":"#acb0be","input":"#ccd0da","ring":"#6d2ebf","midground":"#6d2ebf","midgroundForeground":"#ffffff","composerRing":"#6d2ebf","destructive":"#d20f39","destructiveForeground":"#ffffff","sidebarBackground":"#e6e9ef","sidebarBorder":"#acb0be","userBubble":"#d7d3e9","userBubbleBorder":"#acb0be"},"darkColors":{"background":"#1e1e2e","foreground":"#cdd6f4","card":"#181825","cardForeground":"#cdd6f4","muted":"#29293a","mutedForeground":"#cdd6f4","popover":"#181825","popoverForeground":"#cdd6f4","primary":"#cba6f7","primaryForeground":"#ffffff","secondary":"#4e4466","secondaryForeground":"#cdd6f4","accent":"#3d3652","accentForeground":"#cdd6f4","border":"#585b70","input":"#313244","ring":"#cba6f7","midground":"#cba6f7","midgroundForeground":"#ffffff","composerRing":"#cba6f7","destructive":"#f38ba8","destructiveForeground":"#ffffff","sidebarBackground":"#181825","sidebarBorder":"#585b70","userBubble":"#38324b","userBubbleBorder":"#585b70"}},"everforest":{"colors":{"background":"#fdf6e3","foreground":"#5c6a72","card":"#fdf6e3","cardForeground":"#5c6a72","muted":"#f7f0de","mutedForeground":"#939f91","popover":"#fdf6e3","popoverForeground":"#5c6a72","primary":"#586b35","primaryForeground":"#ffffff","secondary":"#e6e3cb","secondaryForeground":"#5c6a72","accent":"#e9e5ce","accentForeground":"#5c6a72","border":"#fdf6e3","input":"#fdf6e3","ring":"#586b35","midground":"#586b35","midgroundForeground":"#ffffff","composerRing":"#586b35","destructive":"#f1706f","destructiveForeground":"#ffffff","sidebarBackground":"#fdf6e3","sidebarBorder":"#fdf6e3","userBubble":"#e9e5ce","userBubbleBorder":"#fdf6e3"},"darkColors":{"background":"#2d353b","foreground":"#d3c6aa","card":"#2d353b","cardForeground":"#d3c6aa","muted":"#373e42","mutedForeground":"#859289","popover":"#2d353b","popoverForeground":"#d3c6aa","primary":"#a7c080","primaryForeground":"#ffffff","secondary":"#4f5c4e","secondaryForeground":"#d3c6aa","accent":"#434e47","accentForeground":"#d3c6aa","border":"#2d353b","input":"#2d353b","ring":"#a7c080","midground":"#a7c080","midgroundForeground":"#ffffff","composerRing":"#a7c080","destructive":"#da6362","destructiveForeground":"#ffffff","sidebarBackground":"#2d353b","sidebarBorder":"#2d353b","userBubble":"#434e47","userBubbleBorder":"#2d353b"}},"solarized":{"colors":{"background":"#fdf6e3","foreground":"#1f1f1f","card":"#d3cbb7","cardForeground":"#1f1f1f","muted":"#f4eddb","mutedForeground":"#9ca8a6","popover":"#eee8d5","popoverForeground":"#1f1f1f","primary":"#675e34","primaryForeground":"#ffffff","secondary":"#e8e1cb","secondaryForeground":"#1f1f1f","accent":"#ebe4ce","accentForeground":"#1f1f1f","border":"#ddd6c1","input":"#ddd6c1","ring":"#675e34","midground":"#675e34","midgroundForeground":"#ffffff","composerRing":"#675e34","destructive":"#e25563","destructiveForeground":"#ffffff","sidebarBackground":"#eee8d5","sidebarBorder":"#ddd6c1","userBubble":"#c6bea7","userBubbleBorder":"#ddd6c1"},"darkColors":{"background":"#002b36","foreground":"#839496","card":"#002b36","cardForeground":"#839496","muted":"#08313c","mutedForeground":"#586e75","popover":"#001f26","popoverForeground":"#839496","primary":"#6ea1c4","primaryForeground":"#ffffff","secondary":"#1f4c5e","secondaryForeground":"#839496","accent":"#144050","accentForeground":"#839496","border":"#234751","input":"#073642","ring":"#6ea1c4","midground":"#6ea1c4","midgroundForeground":"#ffffff","composerRing":"#6ea1c4","destructive":"#e35957","destructiveForeground":"#ffffff","sidebarBackground":"#001f26","sidebarBorder":"#234751","userBubble":"#144050","userBubbleBorder":"#234751"}},"nous-alt":{"colors":{"background":"#F8FAFF","foreground":"#17171A","card":"#FFFFFF","cardForeground":"#17171A","muted":"#F2F5FF","mutedForeground":"#666678","popover":"#FFFFFF","popoverForeground":"#17171A","primary":"#0053FD","primaryForeground":"#FCFCFC","secondary":"#EAF0FF","secondaryForeground":"#242432","accent":"#E0E9FF","accentForeground":"#202030","border":"#C9D8FB","input":"#AEC3F7","ring":"#0053FD","midground":"#0053FD","composerRing":"#0053FD","destructive":"#C72E4D","destructiveForeground":"#FFFFFF","sidebarBackground":"#F3F7FF","sidebarBorder":"#D5E1FC","userBubble":"#F0F5FF","userBubbleBorder":"#BBD0FA"},"darkColors":{"background":"#0D2F86","foreground":"#FFE6CB","card":"#12378F","cardForeground":"#FFE6CB","muted":"#183F9A","mutedForeground":"#B5C7F3","popover":"#123A96","popoverForeground":"#FFE6CB","primary":"#FFE6CB","primaryForeground":"#0D2F86","secondary":"#1B45A4","secondaryForeground":"#E0E8FF","accent":"#1540B1","accentForeground":"#F0F4FF","border":"#3158AD","input":"#0B2566","ring":"#FFE6CB","midground":"#0053FD","composerRing":"#FFE6CB","destructive":"#C0473A","destructiveForeground":"#FEF2F2","sidebarBackground":"#09286F","sidebarBorder":"#234A9C","userBubble":"#143B91","userBubbleBorder":"#3A63BD"}},"midnight":{"colors":{"background":"#08081c","foreground":"#ddd6ff","card":"#0d0d28","cardForeground":"#ddd6ff","muted":"#13133a","mutedForeground":"#7c7ab0","popover":"#0f0f2e","popoverForeground":"#ddd6ff","primary":"#ddd6ff","primaryForeground":"#08081c","secondary":"#1a1a4a","secondaryForeground":"#c4bff0","accent":"#1a1a44","accentForeground":"#d0c8ff","border":"#1e1e52","input":"#1e1e52","ring":"#8b80e8","midground":"#8b80e8","destructive":"#b03060","destructiveForeground":"#fef2f2","sidebarBackground":"#06061a","sidebarBorder":"#12123a","userBubble":"#14143a","userBubbleBorder":"#242466"},"darkColors":null},"ember":{"colors":{"background":"#160800","foreground":"#ffd8b0","card":"#1e0e04","cardForeground":"#ffd8b0","muted":"#2a1408","mutedForeground":"#aa7a56","popover":"#221008","popoverForeground":"#ffd8b0","primary":"#ffd8b0","primaryForeground":"#160800","secondary":"#341800","secondaryForeground":"#f0c090","accent":"#301600","accentForeground":"#e8c080","border":"#3a1c08","input":"#3a1c08","ring":"#d97316","midground":"#d97316","destructive":"#c43010","destructiveForeground":"#fef2f2","sidebarBackground":"#100600","sidebarBorder":"#2a1004","userBubble":"#2a1000","userBubbleBorder":"#4a2010"},"darkColors":null},"mono":{"colors":{"background":"#0e0e0e","foreground":"#eaeaea","card":"#141414","cardForeground":"#eaeaea","muted":"#1e1e1e","mutedForeground":"#808080","popover":"#181818","popoverForeground":"#eaeaea","primary":"#eaeaea","primaryForeground":"#0e0e0e","secondary":"#262626","secondaryForeground":"#c8c8c8","accent":"#222222","accentForeground":"#d8d8d8","border":"#2a2a2a","input":"#2a2a2a","ring":"#9a9a9a","midground":"#9a9a9a","destructive":"#a84040","destructiveForeground":"#fef2f2","sidebarBackground":"#0a0a0a","sidebarBorder":"#202020","userBubble":"#1a1a1a","userBubbleBorder":"#363636"},"darkColors":null},"cyberpunk":{"colors":{"background":"#000a00","foreground":"#00ff41","card":"#001200","cardForeground":"#00ff41","muted":"#001a00","mutedForeground":"#1a8a30","popover":"#001000","popoverForeground":"#00ff41","primary":"#00ff41","primaryForeground":"#000a00","secondary":"#002800","secondaryForeground":"#00cc34","accent":"#002000","accentForeground":"#00e038","border":"#003000","input":"#003000","ring":"#00ff41","midground":"#00ff41","destructive":"#ff003c","destructiveForeground":"#00a000","sidebarBackground":"#000600","sidebarBorder":"#001800","userBubble":"#001400","userBubbleBorder":"#004800"},"darkColors":null},"slate":{"colors":{"background":"#0d1117","foreground":"#c9d1d9","card":"#161b22","cardForeground":"#c9d1d9","muted":"#21262d","mutedForeground":"#8b949e","popover":"#1c2128","popoverForeground":"#c9d1d9","primary":"#c9d1d9","primaryForeground":"#0d1117","secondary":"#2a3038","secondaryForeground":"#adb5bf","accent":"#1e2530","accentForeground":"#c0c8d0","border":"#30363d","input":"#30363d","ring":"#58a6ff","midground":"#58a6ff","destructive":"#cf4848","destructiveForeground":"#fef2f2","sidebarBackground":"#090d13","sidebarBorder":"#1c2228","userBubble":"#1e2a38","userBubbleBorder":"#2e4060"},"darkColors":null}};
+const root = document.documentElement;
+
+function applyPalette(hexMap) {
+  for (const [k, v] of Object.entries(hexMap)) {
+    root.style.setProperty('--dt-' + k.replace(/[A-Z]/g, m => '-' + m.toLowerCase()), v);
+  }
+}
+function applyTheme(skin, mode) {
+  const preset = HERMES_THEMES[skin] || HERMES_THEMES.nous;
+  const pal = (mode === 'dark' && preset.darkColors) ? preset.darkColors : preset.colors;
+  applyPalette(pal);
+  root.dataset.mode = mode;
+  root.dataset.skin = skin;
+}
+
+// 宿主探测：桌面端 applyTheme() 会写 data-hermes-theme 并注入 --dt-*，
+// 此时我们什么都不做 —— CSS 天然跟随宿主皮肤。
+const HOST_THEMES = new Set(Object.keys(HERMES_THEMES));
+const inHermesHost = () => {
+  const t = document.documentElement.dataset.hermesTheme;
+  return !!t && HOST_THEMES.has(t);
+};
+if (!inHermesHost()) {
+  const params = new URLSearchParams(location.search);
+  const skin = params.get('skin') || 'nous';
+  const mode = params.get('mode')
+    || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  applyTheme(skin, mode);
+}
+
+// ============================================================
+// 帮助按钮（提示收纳）
+// ============================================================
+document.querySelectorAll('[data-help]').forEach(b => {
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    const pop = document.getElementById(b.dataset.help);
+    const open = pop.classList.toggle('open');
+    b.setAttribute('aria-expanded', String(open));
+  });
+});
+
+// ============================================================
+// 开关
+// ============================================================
+document.querySelectorAll('.toggle').forEach(t => {
+  t.addEventListener('click', () => {
+    const on = t.getAttribute('aria-checked') === 'true';
+    t.setAttribute('aria-checked', String(!on));
+  });
+});
+
+// ============================================================
+// 平台：启用 / 高级
+// ============================================================
+document.querySelectorAll('[data-toggle]').forEach(b => {
+  b.addEventListener('click', () => {
+    const on = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', String(!on));
+    b.textContent = !on ? '已启用' : '启用';
+    b.style.color = !on ? 'var(--accent)' : '';
+    b.style.borderColor = !on ? 'var(--accent)' : '';
+  });
+});
+document.querySelectorAll('[data-adv]').forEach(b => {
+  b.addEventListener('click', () => {
+    const panel = document.getElementById(b.dataset.adv);
+    const open = panel.classList.toggle('open');
+    b.textContent = open ? '收起' : '高级';
+    b.classList.toggle('primary', open);
+  });
+});
+
+// ============================================================
+// 标签增删
+// ============================================================
+document.querySelectorAll('[data-add]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const box = document.getElementById(btn.dataset.add);
+    const v = prompt(btn.dataset.add === 'chips-city' ? '输入城市名' : '输入新标签');
+    if (!v) return;
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.innerHTML = v.replace(/</g, '&lt;') + '<button data-x>×</button>';
+    box.insertBefore(chip, btn);
+  });
+});
+document.addEventListener('click', e => {
+  const x = e.target.closest('.chip button[data-x]');
+  if (x) x.closest('.chip').remove();
+});
+
+// ============================================================
+// AI 按钮（demo 模拟）
+// ============================================================
+const AI_SUGGEST = {
+  title: ['可视化', '性能优化', '组件库'],
+  skills: ['vite', 'webpack', 'pinia', 'canvas'],
+  kw: ['前端开发', 'web开发', '可视化', '性能优化']
+};
+document.querySelectorAll('[data-ai]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const kind = btn.dataset.ai;
+    const box = document.getElementById(kind === 'title' ? 'chips-title'
+      : kind === 'skills' ? 'chips-skills' : 'chips-kw');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spin"></span> 分析中…';
+    setTimeout(() => {
+      const add = document.createElement('span');
+      add.className = 'chip';
+      add.innerHTML = AI_SUGGEST[kind][0] + '<button data-x>×</button>';
+      box.insertBefore(add, box.querySelector('.chip-add'));
+      btn.disabled = false;
+      btn.innerHTML = orig;
+    }, 900);
+  });
+});
+
+// ============================================================
+// 岗位卡折叠
+// ============================================================
+document.querySelectorAll('.job-row').forEach(row => {
+  row.addEventListener('click', () => row.parentElement.classList.toggle('open'));
+});
+
+// ============================================================
+// 模板选择（多选）
+// ============================================================
+function syncTplHint() {
+  const hint = document.querySelector('#view-template .panel-head .hint');
+  if (!hint) return;
+  const n = document.querySelectorAll('.tpl-card[aria-pressed="true"]').length;
+  hint.textContent = n ? '已选 ' + n + ' 套' : '未选模板';
+}
+document.querySelectorAll('.tpl-card').forEach(card => {
+  const pick = () => {
+    const on = card.getAttribute('aria-pressed') === 'true';
+    card.setAttribute('aria-pressed', String(!on));
+    syncTplHint();
+  };
+  card.addEventListener('click', pick);
+  card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+});
+
+// ============================================================
+// 简历文档上传 + 本地识别（demo 模拟）
+// ============================================================
+const uploadZone = document.getElementById('upload-zone');
+const parseBtn = document.getElementById('btn-parse');
+const parseStatus = document.getElementById('parse-status');
+let pickedFile = null;
+
+uploadZone.addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.docx,.pdf,.txt,.md';
+  inp.addEventListener('change', () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    pickedFile = f;
+    uploadZone.classList.add('has-file');
+    uploadZone.querySelector('.uz-title').textContent = f.name;
+    uploadZone.querySelector('.uz-sub').textContent = (f.size / 1024).toFixed(0) + ' KB · 待识别';
+    parseBtn.disabled = false;
+    parseStatus.textContent = '已选好文件，可以识别了';
+  });
+  inp.click();
+});
+
+parseBtn.addEventListener('click', () => {
+  if (!pickedFile) return;
+  parseBtn.disabled = true;
+  parseBtn.innerHTML = '<span class="spin"></span> 本地解析中…';
+  parseStatus.textContent = '正在按段落结构抽取字段（不调用大模型）';
+  setTimeout(() => {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    set('f-name', '张三');
+    set('f-phone', '138 0000 0000');
+    set('f-email', 'user@example.com');
+    set('f-school', 'XX 大学');
+    set('f-major', '软件工程');
+    set('f-grad', '2024.06');
+    set('f-exp', '2022-至今  某公司  前端工程师\n' +
+      '- 负责内部管理后台的前端架构，用 Vue 3 + TypeScript 重构了 12 个页面\n' +
+      '- 用 three.js 做过一个产品展示页，含模型加载、动画时间轴驱动、点击拾取\n' +
+      '- 推动构建提速：webpack 换成 vite，冷启动从 90s 降到 8s\n\n' +
+      '2020-2022  某公司  前端开发\n' +
+      '- 维护 jQuery 时代的活动页，逐步迁移到组件化');
+    parseBtn.innerHTML = '重新识别';
+    parseBtn.disabled = false;
+    parseStatus.textContent = '已识别 8 个字段，填入表单草稿。确认后点「保存」写入。';
+    uploadZone.querySelector('.uz-sub').textContent = (pickedFile.size / 1024).toFixed(0) + ' KB · 已识别';
+  }, 1100);
+});
+
+// ── 上传自定义模板 → 转成 HTML 模板加入模板库 ──
+// 只有一处入口：模板库右下角的「＋ 上传模板」格子
+const tplParseBtn = document.getElementById('btn-tpl-parse');
+const tplUploadSlot = document.getElementById('tpl-upload-slot');
+let tplFile = null;
+
+function tplFileChosen(file) {
+  tplFile = file;
+  const ext = (file.name.split('.').pop() || '').toLowerCase();
+  const kind = { docx: 'Word 模板', doc: 'Word 模板', pdf: 'PDF 模板',
+                 png: '图片模板', jpg: '图片模板', jpeg: '图片模板' }[ext] || '模板文件';
+  // 状态回显在按钮上
+  tplParseBtn.textContent = '转换「' + file.name + '」';
+  tplParseBtn.disabled = false;
+  tplParseBtn.title = kind + ' · ' + (file.size / 1024).toFixed(0) + ' KB';
+}
+
+function pickTplFile() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.docx,.doc,.pdf,.png,.jpg,.jpeg';
+  inp.addEventListener('change', () => {
+    const f = inp.files && inp.files[0];
+    if (f) tplFileChosen(f);
+  });
+  inp.click();
+}
+
+if (tplUploadSlot) {
+  tplUploadSlot.addEventListener('click', pickTplFile);
+  tplUploadSlot.setAttribute('title', '点击选择模板文件：Word / PDF / 图片');
+}
+
+tplParseBtn.addEventListener('click', () => {
+  if (!tplFile) return;
+  const orig = tplParseBtn.textContent;
+  tplParseBtn.disabled = true;
+  tplParseBtn.innerHTML = '<span class="spin"></span> 转换中…';
+  const ext = (tplFile.name.split('.').pop() || '').toLowerCase();
+  setTimeout(() => {
+    // demo：模拟转换出一个新模板卡
+    const card = document.createElement('div');
+    card.className = 'tpl-card';
+    card.setAttribute('aria-pressed', 'true');
+    card.setAttribute('tabindex', '0');
+    card.innerHTML = `
+      <div class="tpl-check">✓</div>
+      <div class="tpl-thumb">
+        <div class="mini">
+          <div class="m-name">张三</div>
+          <div class="m-sub">前端工程师 · 杭州</div>
+          <div class="m-bar"></div>
+          <div class="m-sec">工作经历</div>
+          <div class="m-line w80"></div><div class="m-line w60"></div>
+          <div class="m-sec">专业技能</div>
+          <div class="m-line w80"></div>
+        </div>
+      </div>
+      <div class="tpl-info">
+        <div class="tpl-name">${tplFile.name.replace(/\.[^.]+$/, '')}</div>
+        <div class="tpl-desc">自定义 · ${ext.toUpperCase()} 转换</div>
+      </div>`;
+    const grid = document.getElementById('tpl-grid');
+    grid.insertBefore(card, tplUploadSlot);
+    card.addEventListener('click', () => {
+      const on = card.getAttribute('aria-pressed') === 'true';
+      document.querySelectorAll('.tpl-card').forEach(c => c.setAttribute('aria-pressed', 'false'));
+      card.setAttribute('aria-pressed', String(!on));
+      syncTplHint();
+    });
+    syncTplHint();
+    tplParseBtn.textContent = '转换并加入模板库';
+    tplParseBtn.disabled = false;
+    tplParseBtn.title = '';
+    tplFile = null;
+  }, 1300);
+});
+
+// 照片上传（demo）
+document.getElementById('avatar').addEventListener('click', () => {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.addEventListener('change', () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const box = document.getElementById('avatar');
+    const img = document.createElement('img');
+    img.src = URL.createObjectURL(f);
+    box.innerHTML = '';
+    box.appendChild(img);
+  });
+  inp.click();
+});
+
+// ============================================================
+// 简历优化弹层
+// ============================================================
+
+// 记录哪些岗位已经做过简历匹配优化。
+// 必须声明在使用之前（const 有 TDZ），投递逻辑在下方会读它。
+const optimizedJobs = new Set();
+// ============================================================
+// 简历优化弹层
+// ============================================================
+const modal = document.getElementById('modal');
+const steps = ['s1', 's2', 's3', 's4'].map(id => document.getElementById(id));
+
+function resetSteps() {
+  steps.forEach(s => s.classList.remove('done', 'active'));
+  steps[0].classList.add('active');
+}
+let currentOptJob = null;
+document.querySelectorAll('[data-opt]').forEach(b => {
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    currentOptJob = b.dataset.opt;
+    document.getElementById('modal-title').textContent = '简历匹配优化 · ' + b.dataset.opt;
+    const tpl = document.querySelector('.tpl-card[aria-pressed="true"] .tpl-name');
+    document.getElementById('s4-sub').textContent = '使用「' + (tpl ? tpl.textContent : '经典单栏') + '」模板';
+    resetSteps();
+    modal.classList.add('open');
+  });
+});
+function closeModal() { modal.classList.remove('open'); }
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+document.getElementById('modal-run').addEventListener('click', () => {
+  const btn = document.getElementById('modal-run');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> 处理中…';
+  let i = 0;
+  const timer = setInterval(() => {
+    if (i > 0) steps[i - 1].classList.remove('active');
+    if (i < steps.length) {
+      steps[i].classList.add('active');
+      setTimeout(() => steps[i].classList.add('done'), 500);
+      i++;
+    } else {
+      clearInterval(timer);
+      steps[3].classList.remove('active');
+      steps[3].classList.add('done');
+      btn.disabled = false;
+      btn.textContent = '完成';
+      // 优化完成 → 该岗位标记为「已优化」，之后投递直接用这份
+      if (currentOptJob) {
+        optimizedJobs.add(currentOptJob);
+        const ap = document.querySelector(`[data-apply="${currentOptJob}"]`);
+        if (ap) {
+          ap.title = '将投递简历匹配优化后的版本';
+          ap.style.borderColor = 'var(--accent)';
+        }
+      }
+      setTimeout(() => { closeModal(); btn.textContent = '开始优化'; }, 900);
+    }
+  }, 800);
+});
+
+// ============================================================
+// 投递简历
+// 规则：
+//   ① 该岗位做过「简历匹配优化」→ 直接用优化后的那份投递
+//   ② 没做过 → 弹历史简历列表，按对该岗位的匹配度排序，让用户选
+// ============================================================
+
+// 历史简历（demo 数据；真实数据来自「用户简历」模块）
+const HISTORY_RESUMES = [
+  { id: 'r1', name: '前端工程师简历_2026-10.pdf', date: '2026-10-24',
+    tags: ['three.js', 'vue', '性能优化'], score: 86, best: true,
+    note: '投过 3 家，回复率最高' },
+  { id: 'r2', name: '全栈开发简历_2026-08.pdf', date: '2026-08-11',
+    tags: ['node', 'vue', 'typescript'], score: 71,
+    note: '投过 1 家' },
+  { id: 'r3', name: '前端简历_2026-05.pdf', date: '2026-05-20',
+    tags: ['javascript', 'html5', 'css'], score: 58,
+    note: '投过 8 家，回复率一般' },
+  { id: 'r4', name: '应届生简历_2026-03.pdf', date: '2026-03-02',
+    tags: ['javascript', 'css'], score: 34,
+    note: '早期版本' },
+];
+
+const histModal = document.getElementById('modal-hist');
+const histList = document.getElementById('hist-list');
+const histApplyBtn = document.getElementById('hist-apply');
+let histSelected = null;
+let histCurrentJob = null;
+
+function renderHistory(jobName) {
+  // demo：按岗位关键词给历史简历算个匹配度（真实实现走本地打分）
+  const kw = jobName.split(' / ')[0];
+  const scored = HISTORY_RESUMES.map(r => ({
+    ...r,
+    score: Math.max(20, Math.min(98, r.score + (kw.includes('web') ? 4 : 0)))
+  })).sort((a, b) => b.score - a.score);
+
+  histList.innerHTML = scored.map((r, i) => `
+    <div class="hist-card" data-rid="${r.id}" aria-pressed="${i === 0}" role="button" tabindex="0">
+      <div class="hist-thumb"><div class="mini"><div class="m-name"></div><div class="m-line w80"></div><div class="m-line w60"></div></div></div>
+      <div class="hist-main">
+        <div class="hist-name">${r.name}${r.best ? '<span class="hist-best">最常投</span>' : ''}</div>
+        <div class="hist-meta">${r.date} · ${r.note}</div>
+        <div class="hist-tags">${r.tags.map(t => `<span class="tag">${t}</span>`).join('')}</div>
+      </div>
+      <div class="hist-score">
+        <span class="num score ${r.score >= 80 ? 'hi' : r.score >= 55 ? 'mid' : 'low'}">${r.score}</span>
+        <span class="lbl">对该岗匹配</span>
+      </div>
+    </div>
+  `).join('');
+
+  histList.querySelectorAll('.hist-card').forEach(card => {
+    const pick = () => {
+      histList.querySelectorAll('.hist-card').forEach(c => c.setAttribute('aria-pressed', 'false'));
+      card.setAttribute('aria-pressed', 'true');
+      histSelected = card.dataset.rid;
+      histApplyBtn.disabled = false;
+    };
+    card.addEventListener('click', pick);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+  });
+  histSelected = scored[0].id;
+  histApplyBtn.disabled = false;
+}
+
+document.querySelectorAll('[data-apply]').forEach(b => {
+  b.addEventListener('click', e => {
+    e.stopPropagation();
+    const job = b.dataset.apply;
+    histCurrentJob = job;
+
+    if (optimizedJobs.has(job)) {
+      // ① 已优化过 → 直接用优化后的那份
+      b.textContent = '投递中…';
+      b.disabled = true;
+      setTimeout(() => {
+        b.textContent = '已投递';
+        b.classList.remove('btn');
+        b.classList.add('btn');
+        b.disabled = true;
+        b.style.borderColor = 'var(--ok)';
+        b.style.color = 'var(--ok)';
+      }, 900);
+      return;
+    }
+
+    // ② 没优化过 → 弹历史简历
+    document.getElementById('hist-title').textContent = '选择要投递的简历 · ' + job;
+    renderHistory(job);
+    histModal.classList.add('open');
+  });
+});
+
+function closeHist() { histModal.classList.remove('open'); }
+document.getElementById('hist-close').addEventListener('click', closeHist);
+document.getElementById('hist-cancel').addEventListener('click', closeHist);
+histModal.addEventListener('click', e => { if (e.target === histModal) closeHist(); });
+histApplyBtn.addEventListener('click', () => {
+  const job = histCurrentJob;
+  closeHist();
+  const btn = document.querySelector(`[data-apply="${job}"]`);
+  if (btn) {
+    btn.textContent = '已投递';
+    btn.disabled = true;
+    btn.style.borderColor = 'var(--ok)';
+    btn.style.color = 'var(--ok)';
+  }
+});
+
+// ============================================================
+// 保存提示
+// ============================================================
+document.querySelectorAll('[data-save]').forEach(b => {
+  b.addEventListener('click', () => {
+    const tip = document.getElementById('tip-' + b.dataset.save);
+    if (tip) { tip.classList.add('show'); setTimeout(() => tip.classList.remove('show'), 2200); }
+  });
+});
+
+// ============================================================
+// 推送预览字数（链接不计）
+// ============================================================
+const bubbles = [...document.querySelectorAll('.chat-preview .bubble')];
+const cc = document.getElementById('cc');
+if (bubbles.length && cc) {
+  const max = Math.max(...bubbles.map(b => {
+    const clone = b.cloneNode(true);
+    clone.querySelectorAll('.u, .n').forEach(n => n.remove());
+    return clone.textContent.trim().length;
+  }));
+  cc.textContent = '正文最长 ' + max + ' 字（链接不计）';
+  cc.classList.toggle('over', max > 50);
+}
+</script>
+</body>
+</html>

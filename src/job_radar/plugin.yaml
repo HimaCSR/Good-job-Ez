@@ -1,0 +1,18 @@
+name: job-radar
+version: 0.1.0
+description: "招聘岗位雷达 — 定时抓取智联/BOSS 岗位，按个人画像打分，生成日报并推送到 QQ"
+provides_tools:
+  - job_radar_scan
+  - job_radar_daily
+  - job_radar_list
+  - job_radar_mark
+  - job_radar_push
+  - job_radar_login
+config_schema:
+  keywords: {type: list, default: [], description: "搜索关键词列表"}
+  city: {type: str, default: "653", description: "智联城市 jl 代码：653=杭州，538=上海，530=北京，489=全国"}
+  boss_city: {type: str, default: "101210100", description: "BOSS 城市代码，101210100=杭州"}
+  min_score: {type: int, default: 60, description: "日报/推送的入选分数线 0-100"}
+  max_jobs_per_run: {type: int, default: 40, description: "单次运行最多抓多少条"}
+  sites: {type: list, default: ["zhaopin"], description: "启用哪些站：zhaopin / boss"}
+  request_gap_seconds: {type: int, default: 12, description: "两次请求之间的基准间隔（秒）"}

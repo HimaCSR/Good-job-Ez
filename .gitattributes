@@ -1,0 +1,22 @@
+# 统一换行符，避免跨平台 diff 噪音
+* text=auto eol=lf
+
+*.py    text eol=lf diff=python
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+
+# 二进制，不做换行转换
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.docx  binary
+*.woff  binary
+*.woff2 binary

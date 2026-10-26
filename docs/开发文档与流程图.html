@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>好岗好找 · Good-job-Ez 工作流程图</title>
+<style>
+  @page { size: A4; margin: 12mm 10mm; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: #ffffff;
+    color: #16202c;
+    font-family: "Microsoft YaHei", "Segoe UI", -apple-system, sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .page { width: 190mm; margin: 0 auto; }
+  h1 { font-size: 19pt; margin: 0 0 2mm; letter-spacing: .5px; }
+  .sub { font-size: 9pt; color: #5a6b7d; margin: 0 0 5mm; }
+  h2 { font-size: 11pt; margin: 6mm 0 2.5mm; padding-bottom: 1.2mm;
+       border-bottom: 1.2pt solid #2f6f4f; color: #2f6f4f; }
+  .legend { display: flex; gap: 3mm; flex-wrap: wrap; margin-bottom: 4mm;
+            font-size: 8pt; }
+  .legend span { padding: .6mm 2mm; border-radius: 2mm; border: .5pt solid; }
+  .lg-read { background: #e8f3ec; border-color: #4e9c72; color: #1f5c3d; }
+  .lg-judge { background: #eaf0fb; border-color: #5b7fd4; color: #2b4a9c; }
+  .lg-write { background: #fdeeea; border-color: #d97757; color: #a8412a; }
+  .lg-notice { background: #f4f1fa; border-color: #8a6dc4; color: #5b3f96; }
+  .lg-ext { background: #f0f2f5; border-color: #8a99a8; color: #465666; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+  th, td { border: .5pt solid #c8d0d8; padding: 1.8mm 2.2mm; text-align: left;
+           vertical-align: top; line-height: 1.45; }
+  th { background: #f0f4f7; font-weight: 600; color: #2b3a49; }
+  td code { background: #f4f6f8; padding: 0 1mm; border-radius: 1mm;
+            font-size: 8.6pt; font-family: Consolas, "Courier New", monospace;
+            word-break: break-all; }
+  .flow { background: #fbfcfd; border: .5pt solid #c8d0d8; border-radius: 2mm;
+          padding: 3mm; }
+  .phase { display: flex; align-items: center; gap: 2mm; margin: 2mm 0; }
+  .phase .n { flex: 0 0 7mm; height: 7mm; border-radius: 50%;
+              background: #2f6f4f; color: #fff; font-size: 8pt;
+              display: flex; align-items: center; justify-content: center;
+              font-weight: 700; }
+  .phase .t { font-size: 9.5pt; font-weight: 700; color: #1f2c3a; }
+  .phase .d { font-size: 8pt; color: #5a6b7d; }
+  .arrow { text-align: center; color: #8a99a8; font-size: 9pt; margin: -.5mm 0; }
+  .note { background: #fff8e6; border-left: 2.5pt solid #e0a72e; padding: 2mm 3mm;
+          font-size: 8pt; margin: 3mm 0; }
+  .note b { color: #8a6410; }
+  .risk { background: #fdeeea; border-left: 2.5pt solid #d97757; padding: 2mm 3mm;
+          font-size: 8pt; margin: 3mm 0; }
+  .risk b { color: #a8412a; }
+  .ok { background: #e8f3ec; border-left: 2.5pt solid #4e9c72; padding: 2mm 3mm;
+        font-size: 8pt; margin: 3mm 0; }
+  .ok b { color: #1f5c3d; }
+  .grid2 { display: flex; gap: 3mm; }
+  .grid2 > div { flex: 1; }
+  .cap { font-size: 7.5pt; color: #7b8a99; margin-top: 1mm; }
+  svg { display: block; }
+  .pb { page-break-before: always; }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>好岗好找 · Good-job-Ez 插件</h1>
+  <p class="sub">开发文档与工作流程图 · Hermes Plugin for Windows 11 · v0.2.0 设计稿</p>
+
+  <div class="legend">
+    <span class="lg-read">① 采集层 · 只读</span>
+    <span class="lg-judge">② 判断层 · 本地</span>
+    <span class="lg-write">③ 行动层 · 需确认</span>
+    <span class="lg-notice">公告通道 · 不打分</span>
+    <span class="lg-ext">外部系统</span>
+  </div>
+
+  <h2>一、整体架构</h2>
+  <div class="flow">
+    <svg width="100%" viewBox="0 0 700 420" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="ar" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <polygon points="0 0, 9 3.5, 0 7" fill="#5a6b7d"/>
+        </marker>
+        <marker id="arw" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <polygon points="0 0, 9 3.5, 0 7" fill="#d97757"/>
+        </marker>
+        <marker id="arg" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <polygon points="0 0, 9 3.5, 0 7" fill="#4e9c72"/>
+        </marker>
+        <marker id="arp" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+          <polygon points="0 0, 9 3.5, 0 7" fill="#8a6dc4"/>
+        </marker>
+      </defs>
+
+      <!-- ===== row 1: cron -> plugin -> qq ===== -->
+      <rect x="8" y="16" width="146" height="50" rx="5" fill="#f0f4f7" stroke="#8a99a8" stroke-width="1.2"/>
+      <text x="81" y="37" text-anchor="middle" font-size="11.5" font-weight="700" fill="#2b3a49">Hermes cron</text>
+      <text x="81" y="52" text-anchor="middle" font-size="9.5" fill="#5a6b7d">每天 09:00 / 20:00</text>
+
+      <rect x="205" y="8" width="270" height="130" rx="6" fill="#e8f3ec" stroke="#4e9c72" stroke-width="1.5"/>
+      <text x="340" y="26" text-anchor="middle" font-size="12" font-weight="700" fill="#1f5c3d">好岗好找 · Good-job-Ez</text>
+      <rect x="218" y="36" width="118" height="36" rx="4" fill="#ffffff" stroke="#4e9c72" stroke-width="1"/>
+      <text x="277" y="51" text-anchor="middle" font-size="9.5" font-weight="600" fill="#1f5c3d">扫描器 scan</text>
+      <text x="277" y="64" text-anchor="middle" font-size="8.5" fill="#5a6b7d">抓取 → 打分 → 入库</text>
+      <rect x="344" y="36" width="118" height="36" rx="4" fill="#ffffff" stroke="#4e9c72" stroke-width="1"/>
+      <text x="403" y="51" text-anchor="middle" font-size="9.5" font-weight="600" fill="#1f5c3d">日报 daily</text>
+      <text x="403" y="64" text-anchor="middle" font-size="8.5" fill="#5a6b7d">Markdown + 摘要</text>
+      <rect x="218" y="80" width="118" height="36" rx="4" fill="#ffffff" stroke="#4e9c72" stroke-width="1"/>
+      <text x="277" y="95" text-anchor="middle" font-size="9.5" font-weight="600" fill="#1f5c3d">简历 resume</text>
+      <text x="277" y="108" text-anchor="middle" font-size="8.5" fill="#5a6b7d">定向优化（防编造）</text>
+      <rect x="344" y="80" width="118" height="36" rx="4" fill="#fdeeea" stroke="#d97757" stroke-width="1.4"/>
+      <text x="403" y="95" text-anchor="middle" font-size="9.5" font-weight="600" fill="#a8412a">投递 apply</text>
+      <text x="403" y="108" text-anchor="middle" font-size="8.5" fill="#a8412a">两步确认</text>
+
+      <rect x="530" y="16" width="160" height="50" rx="5" fill="#f0f4f7" stroke="#8a99a8" stroke-width="1.2"/>
+      <text x="610" y="37" text-anchor="middle" font-size="11.5" font-weight="700" fill="#2b3a49">QQ 私聊</text>
+      <text x="610" y="52" text-anchor="middle" font-size="9.5" fill="#5a6b7d">岗位名·城市+链接</text>
+
+      <!-- ===== row 2: storage / gates ===== -->
+      <rect x="8" y="96" width="176" height="86" rx="6" fill="#f7f9fb" stroke="#8a99a8" stroke-width="1.2"/>
+      <text x="96" y="113" text-anchor="middle" font-size="10" font-weight="700" fill="#465666">本地存储</text>
+      <text x="96" y="128" text-anchor="middle" font-size="8.5" fill="#5a6b7d">plugin-data/job-radar/</text>
+      <text x="96" y="143" text-anchor="middle" font-size="8.5" fill="#5a6b7d">jobs.db（SQLite 岗位池）</text>
+      <text x="96" y="158" text-anchor="middle" font-size="8.5" fill="#5a6b7d">reports/ · resume/ · drafts/</text>
+      <text x="96" y="173" text-anchor="middle" font-size="8.5" fill="#5a6b7d">PAUSE（总闸开关）</text>
+
+      <rect x="530" y="96" width="160" height="86" rx="6" fill="#fdeeea" stroke="#d97757" stroke-width="1.4"/>
+      <text x="610" y="113" text-anchor="middle" font-size="10" font-weight="700" fill="#a8412a">风险闸门</text>
+      <text x="610" y="128" text-anchor="middle" font-size="8.5" fill="#a8412a">allow_apply 开关（默认关）</text>
+      <text x="610" y="143" text-anchor="middle" font-size="8.5" fill="#a8412a">confirm_token 一次性 5 分钟</text>
+      <text x="610" y="158" text-anchor="middle" font-size="8.5" fill="#a8412a">每日投递上限 10 条</text>
+      <text x="610" y="173" text-anchor="middle" font-size="8.5" fill="#a8412a">不通过 = 不投递</text>
+
+      <!-- ===== row 3: collection layer ===== -->
+      <rect x="8" y="248" width="682" height="160" rx="6" fill="#f7f9fb" stroke="#8a99a8" stroke-width="1.2" stroke-dasharray="5,3"/>
+      <text x="22" y="266" font-size="10.5" font-weight="700" fill="#465666">采集层 · bb-browser（只读）</text>
+
+      <rect x="22" y="274" width="196" height="122" rx="5" fill="#e8f3ec" stroke="#4e9c72" stroke-width="1.2"/>
+      <text x="120" y="292" text-anchor="middle" font-size="10" font-weight="700" fill="#1f5c3d">bb-browser daemon</text>
+      <text x="120" y="308" text-anchor="middle" font-size="8.5" fill="#5a6b7d">127.0.0.1:19824</text>
+      <text x="120" y="324" text-anchor="middle" font-size="8.5" fill="#5a6b7d">CLI 封装 + 随机限速</text>
+      <text x="120" y="340" text-anchor="middle" font-size="8.5" fill="#5a6b7d">每次请求后停 12~32 秒</text>
+      <text x="120" y="356" text-anchor="middle" font-size="8.5" fill="#5a6b7d">单次运行条数封顶</text>
+      <text x="120" y="372" text-anchor="middle" font-size="8.5" fill="#5a6b7d">写操作每日上限</text>
+      <text x="120" y="388" text-anchor="middle" font-size="8.5" fill="#5a6b7d">被限流 → 加大间隔</text>
+
+      <rect x="242" y="274" width="196" height="122" rx="5" fill="#e8f3ec" stroke="#4e9c72" stroke-width="1.2"/>
+      <text x="340" y="292" text-anchor="middle" font-size="10" font-weight="700" fill="#1f5c3d">私有 adapter 库</text>
+      <text x="340" y="308" text-anchor="middle" font-size="8.5" fill="#5a6b7d">~/.bb-browser/sites/</text>
+      <text x="340" y="326" text-anchor="middle" font-size="8.5" fill="#5a6b7d">boss/search · boss/detail</text>
+      <text x="340" y="342" text-anchor="middle" font-size="8.5" fill="#5a6b7d">boss/greet（我自己写）</text>
+      <text x="340" y="358" text-anchor="middle" font-size="8.5" fill="#5a6b7d">zhaopin/search · zhaopin/city</text>
+      <text x="340" y="374" text-anchor="middle" font-size="8.5" fill="#5a6b7d">zhaopin/detail · huibo/*</text>
+      <text x="340" y="390" text-anchor="middle" font-size="8.5" fill="#5a6b7d">统一字段词表输出</text>
+
+      <rect x="462" y="274" width="214" height="122" rx="5" fill="#e8f3ec" stroke="#4e9c72" stroke-width="1.2"/>
+      <text x="569" y="292" text-anchor="middle" font-size="10" font-weight="700" fill="#1f5c3d">你的真实 Chrome</text>
+      <text x="569" y="308" text-anchor="middle" font-size="8.5" fill="#5a6b7d">复用你的 Chrome（9222）</text>
+      <text x="569" y="324" text-anchor="middle" font-size="8.5" fill="#5a6b7d">已有登录态</text>
+      <text x="569" y="340" text-anchor="middle" font-size="8.5" fill="#5a6b7d">同源 fetch 复用 Cookie</text>
+      <text x="569" y="356" text-anchor="middle" font-size="8.5" fill="#5a6b7d">不碰你日常窗口</text>
+      <text x="569" y="372" text-anchor="middle" font-size="8.5" fill="#c25b3a">出口 IP 仍是同一个</text>
+      <text x="569" y="388" text-anchor="middle" font-size="8.5" fill="#5a6b7d">（profile 只隔离 cookie）</text>
+
+      <!-- ===== arrows ===== -->
+      <line x1="154" y1="41" x2="202" y2="41" stroke="#5a6b7d" stroke-width="1.4" marker-end="url(#ar)"/>
+      <line x1="475" y1="41" x2="527" y2="41" stroke="#5a6b7d" stroke-width="1.4" marker-end="url(#ar)"/>
+
+      <!-- plugin -> storage -->
+      <line x1="205" y1="100" x2="187" y2="120" stroke="#5a6b7d" stroke-width="1.3" marker-end="url(#ar)"/>
+      <text x="196" y="128" font-size="8" fill="#5a6b7d" text-anchor="end">写入</text>
+      <!-- storage -> plugin (return) -->
+      <line x1="150" y1="182" x2="215" y2="128" stroke="#4e9c72" stroke-width="1.3"
+            stroke-dasharray="4,3" marker-end="url(#arg)"/>
+      <text x="150" y="176" font-size="8" fill="#1f5c3d" text-anchor="end">读取岗位池</text>
+
+      <!-- plugin -> risk gate -->
+      <line x1="475" y1="100" x2="527" y2="120" stroke="#d97757" stroke-width="1.4" marker-end="url(#arw)"/>
+      <text x="516" y="128" font-size="8" fill="#a8412a" text-anchor="middle">投递</text>
+      <!-- risk gate -> back (approve) -->
+      <line x1="560" y1="182" x2="470" y2="120" stroke="#d97757" stroke-width="1.3"
+            stroke-dasharray="4,3" marker-end="url(#arw)"/>
+      <text x="566" y="176" font-size="8" fill="#a8412a" text-anchor="start">通过才执行</text>
+
+      <!-- plugin -> collection (request) -->
+      <line x1="340" y1="138" x2="340" y2="244" stroke="#5a6b7d" stroke-width="1.4" marker-end="url(#ar)"/>
+      <text x="348" y="196" font-size="8.5" fill="#5a6b7d">① 发请求</text>
+      <!-- collection -> plugin (return data) -->
+      <line x1="300" y1="244" x2="300" y2="142" stroke="#4e9c72" stroke-width="1.4"
+            stroke-dasharray="5,3" marker-end="url(#arg)"/>
+      <text x="296" y="196" font-size="8.5" fill="#1f5c3d" text-anchor="end">② 返回岗位 JSON</text>
+
+      <!-- collection internal -->
+      <line x1="218" y1="335" x2="240" y2="335" stroke="#5a6b7d" stroke-width="1.3" marker-end="url(#ar)"/>
+      <line x1="438" y1="335" x2="460" y2="335" stroke="#5a6b7d" stroke-width="1.3" marker-end="url(#ar)"/>
+
+      <!-- notice channel -->
+      <rect x="242" y="404" width="196" height="14" rx="3" fill="#f4f1fa" stroke="#8a6dc4" stroke-width="1"/>
+      <text x="340" y="414" text-anchor="middle" font-size="8.5" fill="#5b3f96">广西人才网 / 重庆人社 暂缓接入 · 适配器未开发</text>
+      <line x1="340" y1="396" x2="340" y2="402" stroke="#8a6dc4" stroke-width="1.2" marker-end="url(#arp)"/>
+    </svg>
+
+  </div>
+
+  <h2>二、一次完整运行的工作流程</h2>
+  <div class="flow">
+    <div class="phase"><div class="n">1</div><div>
+      <span class="t">定时器唤醒</span>
+      <span class="d">— cron 在新会话执行自包含 prompt，先查 PAUSE 文件；存在则直接退出</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">2</div><div>
+      <span class="t">读取配置与画像</span>
+      <span class="d">— 关键词列表、期望城市（多选）、分数线、每日上限、profile.yaml（身份信息 / 技能 / 真实经历）</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">3</div><div>
+      <span class="t">按站逐个抓取（只读）</span>
+      <span class="d">— 对每个站调 adapter，<b>每次调用后随机停顿 12~32 秒</b>，单次运行条数封顶</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">4</div><div>
+      <span class="t">归一化 + 去重</span>
+      <span class="d">— 各站字段映射到统一词表（title / company / salary / city / experience / skills / url / job_id）</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">5</div><div>
+      <span class="t">本地打分（不烧 LLM）</span>
+      <span class="d">— 四项加权求和 → 0~100 分，并给出命中理由与缺口<span style="font-size:.92em;opacity:.8">（2026-10-26 调整：去掉经验项，城市/薪资各 +5）</span></span>
+      <table style="margin-top:1.6mm; width:auto;">
+        <tr>
+          <th style="padding:.9mm 3mm;">职位名命中</th>
+          <th style="padding:.9mm 3mm;">技能覆盖</th>
+          <th style="padding:.9mm 3mm;">城市</th>
+          <th style="padding:.9mm 3mm;">薪资</th>
+        </tr>
+        <tr>
+          <td style="padding:.9mm 3mm; text-align:center;">30</td>
+          <td style="padding:.9mm 3mm; text-align:center;">30</td>
+          <td style="padding:.9mm 3mm; text-align:center;">20</td>
+          <td style="padding:.9mm 3mm; text-align:center;">20</td>
+        </tr>
+      </table>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">6</div><div>
+      <span class="t">入 SQLite 岗位池</span>
+      <span class="d">— job_id 主键，INSERT OR IGNORE；新岗位才进日报</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">7</div><div>
+      <span class="t">生成日报</span>
+      <span class="d">— reports/YYYY-MM-DD.md：高分岗位、分数、匹配理由、缺口、链接（完整明细留在文件里，推送只是索引）</span>
+    </div></div>
+    <div class="arrow">▼</div>
+
+    <div class="phase"><div class="n">8</div><div>
+      <span class="t">推送 QQ</span>
+      <span class="d">— 每条「岗位名 · 城市 + 链接」；不带分数与理由；链接不计 50 字限制</span>
+    </div></div>
+  </div>
+
+  <div class="ok">
+    <b>你之后要做的（按需触发，不自动）</b><br>
+    ① 点<b>「简历匹配优化」</b>→ 读你的真实经历 + 该岗 JD → 生成定向简历要点，
+    每条标「← 依据：原始经历片段」→ 按模板生成<br>
+    ② 点<b>「投递简历」</b>→ 若该岗已优化过，<b>直接投递优化后那份</b>；
+    没优化过则<b>弹历史简历</b>，按对该岗匹配分排序让你挑<br>
+    ③ 你选定后 → 一次性确认令牌（5 分钟有效）→ 你回一句「发」→ 带令牌再调一次 → <b>才真的打招呼</b><br>
+    ④ 投递成功的简历<b>自动存 PDF + 打标签</b>进「用户简历」，作为以后简历推荐的依据
+  </div>
+
+  <h2 class="pb">三、站点适配表</h2>
+  <table>
+    <tr>
+      <th style="width:16%">站点</th>
+      <th style="width:13%">形态</th>
+      <th style="width:26%">接口 / 路径</th>
+      <th style="width:23%">我要写的 adapter</th>
+      <th style="width:22%">打分 / 投递</th>
+    </tr>
+    <tr>
+      <td><b>BOSS直聘</b><br><code>www.zhipin.com</code></td>
+      <td>结构化 API</td>
+      <td><code>/wapi/zpgeek/search/joblist.json</code><br>
+          <code>/wapi/zpgeek/job/detail.json?securityId=</code></td>
+      <td>search（社区已有，只读）<br>detail（社区已有）<br><b>greet（我自己写）</b></td>
+      <td>可打分<br>可打招呼（需确认）</td>
+    </tr>
+    <tr>
+      <td><b>智联招聘</b><br><code>fe-api.zhaopin.com</code></td>
+      <td>结构化 API</td>
+      <td><code>/c/i/sou?kw=&amp;cityId=&amp;kt=3</code><br>
+          <code>/c/i/city-page/user-city?ipCity=</code></td>
+      <td>zhaopin/search<br>zhaopin/city</td>
+      <td>可打分<br>投递另议（走智联 APP）</td>
+    </tr>
+    <tr>
+      <td><b>广西人才网</b><br><span style="font-size:11px;color:#b8860b;font-weight:600">暂缓接入</span><br>
+          <code>www.gxrc.com</code><br>
+          <code>s. / lz. / gp. / jyjx.</code></td>
+      <td>DOM 抓取</td>
+      <td><code>/sJob?schType=1&amp;page=</code><br>
+          <code>/jobDetail/&lt;hash&gt;</code></td>
+      <td>gxrc/search（按子域各一个）<br>gxrc/detail</td>
+      <td>可打分（需字段映射）<br>投递不支持</td>
+    </tr>
+    <tr>
+      <td><b>汇博招聘网</b><br><code>huibo.com</code><br>（= 重庆人才网）</td>
+      <td>DOM 抓取</td>
+      <td>列表页 + 详情页，字段手工映射</td>
+      <td>huibo/search<br>huibo/detail</td>
+      <td>可打分<br>投递不支持</td>
+    </tr>
+    <tr>
+      <td><b>重庆人社 / 重庆就业网</b><br><span style="font-size:11px;color:#b8860b;font-weight:600">暂缓接入</span><br>
+          <code>ggfw.rlsbj.cq.gov.cn</code><br>
+          <code>rlsbj.cq.gov.cn</code></td>
+      <td>公告流</td>
+      <td>通知公告列表 + 公告页（PDF/XLSX 附件）</td>
+      <td>cqrs/notices</td>
+      <td><b>不打分</b><br>只列标题/日期/链接</td>
+    </tr>
+  </table>
+  <p class="cap">
+    <b>暂缓接入（2026-10-26 用户决定）</b>：广西人才网、重庆人社 暂不开发 adapter。
+    两者都不在设置页的「平台接入」列表里出现，只在「全局控制 → 暂缓接入的平台」里
+    标注为待开发。原因是多子域名各要一个 adapter、政务公告流又不参与打分，
+    投入产出比低。等 BOSS + 智联 + 汇博跑顺了再说。<br>
+    注：子域名是独立的浏览器身份，<code>lz.gxrc.com</code> 的 adapter 不能 fetch
+    <code>s.gxrc.com</code>，每个要用的子域各写一个。智联的
+    <code>fe-api.zhaopin.com</code> 与 <code>dict.zhaopin.cn</code> 也是不同源。
+  </p>
+
+  <h2>四、风险控制清单</h2>
+  <div class="risk">
+    <b>① 风控是最需要盯的</b><br>
+    BOSS 抓太频繁会弹验证码。缓解：每次请求后随机停顿 12~32 秒、单次运行条数封顶、
+    写操作每日上限 10 条、PAUSE 文件随时可停。<b>被限流时第一件事是加大间隔，不是加并发。</b>
+  </div>
+  <div class="risk">
+    <b>② IP 不会因为独立 profile 而改变</b><br>
+    独立 Chrome profile 只隔离登录态和 cookie，<b>出口 IP 仍是同一个</b>。
+    这一点必须提前说清楚，不能暗示能隐藏。
+  </div>
+  <div class="risk">
+    <b>③ 投递是不可逆动作</b><br>
+    三道门：<code>allow_apply</code> 开关（默认关）→ 一次性确认令牌（5 分钟、绑定 job_id）
+    → 每日上限。没点头就不会发出去。
+  </div>
+  <div class="note">
+    <b>④ 简历不编造</b><br>
+    prompt 里写死「只能用 profile.yaml 里真实经历中出现过的内容」，并要求每条 bullet 标注
+    「← 依据：」。生成物<b>不会自动使用</b>，你要自己看过才算数。
+  </div>
+  <div class="note">
+    <b>⑤ 简历文件不走大模型</b><br>
+    上传的 .docx / .pdf 只在本地用规则解析（段落结构 + 字段关键词抽取），
+    <b>不发给任何模型</b>，避免个人信息外泄。解析结果填成草稿，用户确认后才写入。<br>
+    <b>例外</b>：「AI 根据经历推荐」按钮传的是从经历里提取的<b>方向词</b>，
+    不是原始简历文件，可以调大模型。这两条路径必须分开实现，别混了。
+  </div>
+  <div class="note">
+    <b>⑥ 投递参数下沉到每个平台</b><br>
+    风控与安全配置按平台分开存（BOSS 是打招呼上限，智联是投递上限，
+    还有各自的专属项）。不存在一个全局开关覆盖所有站 ——
+    某站的限流规则和另一站根本不一样，用一个滑杆管全部站迟早出事。
+  </div>
+  <div class="note">
+    <b>⑦ 社区 adapter 会被覆盖</b><br>
+    <code>~/.bb-browser/sites/</code>（私有）优先级高于 <code>bb-sites/</code>（社区）。
+    所有我自己写的、尤其带写操作的 adapter，都放私有目录，社区更新不会改掉行为。
+  </div>
+
+  <h2>五、目录结构</h2>
+  <table>
+    <tr><th style="width:34%">路径</th><th>内容</th></tr>
+    <tr><td><code>~/.hermes/plugins/job-radar/</code></td>
+        <td>Hermes 插件本体：plugin.yaml、tools.py、matcher.py、bbclient.py、storage.py、report.py、resume.py、tokens.py、profile.yaml、tests/</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ login_check.py</code></td>
+        <td><b>登录态体检</b>：凭证 → 状态 / 剩余天数（纯函数，可单测）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ browser_cookies.py</code></td>
+        <td>走 CDP <code>Storage.getCookies</code> 读 cookie（不落盘、不进日志）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ resume_parser.py</code></td>
+        <td><b>简历文档本地解析</b>：.docx/.pdf/.txt → 字段草稿。<b>不调大模型</b></td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ ai_suggest.py</code></td>
+        <td><b>AI 推荐</b>：从「真实经历」提取岗位方向 / 技能 / 关键词。<b>允许调大模型</b></td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ templates/</code></td>
+        <td><b>简历模板库</b>：4 套内置（classic / modern / tech / acad）+ 用户上传转换的。<br>
+            缩略图与实际输出<b>同源</b>（同一份 HTML + CSS）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ template_parser.py</code></td>
+        <td><b>自定义模板转换</b>：.docx 抽版式 → HTML；.pdf / 图片 → 底图+文本层混合模板</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ resume_store.py</code></td>
+        <td><b>用户简历档案</b>：投递成功的简历存 PDF + 标签；简历评分推荐的数据源</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ resume_matcher.py</code></td>
+        <td><b>历史简历 × 岗位打分</b>：拿简历标签与岗位要求算匹配度，给投递时的排序</td></tr>
+    <tr><td><code>&nbsp;&nbsp;└─ site_config.py</code></td>
+        <td><b>每平台独立的风控配置</b>（投递上限、跳过外包、风控降速…）</td></tr>
+    <tr><td><code>~/.hermes/plugins/job-radar/desktop/</code></td>
+        <td>设置页：<code>index.html</code>（消费 <code>--dt-*</code> 跟随 Hermes 皮肤）+ <code>plugin.js</code>（前后端桥）</td></tr>
+    <tr><td><code>~/.hermes/plugins/job-radar/dashboard/plugin_api.py</code></td>
+        <td>设置页后端：读写 profile.yaml / 配置 / 模板选择 / 抓取结果</td></tr>
+    <tr><td><code>~/.bb-browser/sites/</code></td>
+        <td>我写的私有 adapter（boss/*、zhaopin/*、huibo/*）<br>
+            <b>gxrc/*、cqrs/* 暂缓开发</b></td></tr>
+    <tr><td><code>~/.bb-browser/bb-sites/</code></td>
+        <td>社区 adapter（只读，已克隆到本地）</td></tr>
+    <tr><td><code>~/AppData/Local/hermes/tools/bb-browser/</code></td>
+        <td>bb-browser 安装目录 + 固定 node 版本的包装脚本 bb.sh</td></tr>
+    <tr><td><code>~/AppData/Local/hermes/plugin-data/job-radar/</code></td>
+        <td>运行时数据：jobs.db、reports/、resume/（投递成功的 PDF 简历 + 标签）、drafts/、uploads/（简历原件 + 模板原件）、templates/（转换后的模板）、PAUSE</td></tr>
+  </table>
+
+<h2>六、开发阶段与验收</h2>
+  <table>
+    <tr><th style="width:6%">阶段</th><th style="width:26%">交付物</th><th>验收标准</th></tr>
+    <tr><td><b>T0</b></td><td>跑通一次只读抓取</td>
+        <td><code>site boss/search</code> 返回真实 JSON；<b>失败就停下问你，不绕过登录</b></td></tr>
+    <tr><td><b>T1</b></td><td>bb-browser 固定安装 + 包装脚本</td>
+        <td><code>bb.sh site list</code> 列出平台</td></tr>
+    <tr><td><b>T2</b></td><td>私有 adapter：boss/greet</td>
+        <td><code>site info boss/greet</code> 显示参数；抓包确认请求格式</td></tr>
+    <tr><td><b>T3</b></td><td>插件骨架</td>
+        <td><code>hermes plugins doctor . --ci</code> 退出码 0</td></tr>
+    <tr><td><b>T4</b></td><td>matcher.py + 单测</td>
+        <td>完美匹配 ≥90 分；错城市错技能 &lt;50 分；分数永不越界<br>
+        <b>公式：职位名 30 + 技能 30 + 城市 20 + 薪资 20</b>（无经验项）</td></tr>
+    <tr><td><b>T5</b></td><td>bbclient.py / storage.py</td>
+        <td>限速生效；同 job_id 重复插入不新增行</td></tr>
+    <tr><td><b>T6</b></td><td>tools.py 工具集</td>
+        <td>全部返回 JSON 字符串、不抛异常</td></tr>
+    <tr><td><b>T7</b></td><td>日报 + 简历 + 草稿</td>
+        <td>日报含分数与链接；简历每条带「← 依据：」<br>
+        <b>推送只发「岗位名 · 城市 + 链接」</b>，不带分数与理由</td></tr>
+    <tr><td><b>T8</b></td><td>投递两步协议</td>
+        <td>不带令牌<b>不投递</b>；令牌一次性、过期失效</td></tr>
+    <tr><td><b>T9</b></td><td>多站 adapter</td>
+        <td>zhaopin / huibo 各自返回统一词表 JSON<br>
+        <b>gxrc / cqrs 暂缓</b>（用户 2026-10-26 决定）</td></tr>
+    <tr><td><b>T10</b></td><td>挂 cron</td>
+        <td>到点推送，每条「岗位名 · 城市 + 链接」≤50 字（链接除外）；
+        连续两天不重复推同一岗位</td></tr>
+    <tr><td><b>T11</b></td><td>设置页（HTML demo 已确认）</td>
+        <td>五个模块能读写配置；<b>主题跟随 Hermes</b>（宿主换皮肤插件跟着变）</td>
+    </tr>
+    <tr><td><b>T12</b></td><td>简历文档本地解析</td>
+        <td>.docx/.pdf/.txt 解析出字段，<b>不调用大模型</b>；结果填成草稿待确认</td>
+    </tr>
+    <tr><td><b>T13</b></td><td>AI 推荐岗位方向 / 技能 / 关键词</td>
+        <td>从「真实经历」提取；<b>与简历导入区分</b>，这里允许调大模型</td>
+    </tr>
+    <tr><td><b>T14</b></td><td>简历模板库 + 渲染器</td>
+        <td>4 套模板；缩略图与实际输出同源；支持多选与 Agent 自动选模板</td>
+    </tr>
+    <tr><td><b>T15</b></td><td>简历生成四步流程</td>
+        <td>读 JD → 挑要求 → 对照经历 → 按模板生成；<b>不编造经历</b>；投递仍需手动确认</td>
+    </tr>
+    <tr><td><b>T16</b></td><td>投递两路径 + 历史简历推荐</td>
+        <td>已优化 → 直接投优化版；未优化 → 弹历史简历并按<b>对该岗匹配分</b>排序；
+        无历史简历 → 引导去优化</td>
+    </tr>
+    <tr><td><b>T17</b></td><td>用户简历档案（PDF + 标签）</td>
+        <td>投递成功的简历自动存 PDF 并打标签；列表能预览 / 下载 / 设默认；
+        标签可被 <code>resume_matcher</code> 读取</td>
+    </tr>
+    <tr><td><b>T18</b></td><td>自定义模板转换</td>
+        <td>.docx 抽版式 → HTML 模板；.pdf / 图片 → 底图+文本层；
+        转换后进模板库，与内置模板同一套渲染器</td></tr>
+  </table>
+
+ <div class="ok">
+  <b>给你的确认点</b><br>
+  1. 设置页 UI（<code>job-radar/设置页-demo.html</code>）看得过吗？哪里要调<br>
+  2. 后端先做哪块 —— 我建议 T11 设置页 + T16 投递两路径，因为这两块最贴近你的日常使用<br>
+  3. 风险档位默认「只读」，要不要一开始就开「半自动」？<br>
+  4. profile.yaml 里你的真实经历，谁来写？你口述我来填也行。
+</div>
+
+</div>
+</body>
+</html>
+<h2>七、设置页规格（2026-10-26 用户确认后定稿）</h2>
+<p class="sub">UI demo：<code>job-radar/设置页-demo.html</code>。五个模块，主题跟随 Hermes。</p>
+
+<table>
+  <tr><th style="width:14%">模块</th><th style="width:30%">内容</th><th>后端要点</th></tr>
+  <tr><td><b>个人信息</b></td>
+      <td>简历文档导入 / 身份信息 / 期望条件 / 技能 / 真实经历</td>
+      <td>
+        ① <b>简历文档导入</b>：.docx/.pdf/.txt 上传后<b>本地规则解析</b>（段落结构 + 字段关键词抽取），
+           <b>不走大模型</b>，避免简历内容外泄。解析结果是<b>草稿</b>，用户确认后才写入。<br>
+        ② <b>身份信息</b>：照片 / 姓名 / 电话 / 邮箱 / 学历 / 院校 / 专业 / 毕业时间。
+           <b>不参与打分</b>，只在生成简历时填模板抬头。只存本地。<br>
+        ③ <b>期望城市</b>：改成<b>多选</b>（标签数组），命中任一城市即算符合城市项。<br>
+        ④ <b>岗位方向 / 技能 / 搜索关键词</b>：除手工添加外，各带一个
+           <b>「✦ AI 根据经历推荐」</b>按钮 —— 从「真实经历」文本里提取方向词。<b>注意与简历导入不同：
+           这里允许调大模型</b>，因为传出去的是经历摘要而非原始简历文件。<br>
+        ⑤ <b>期望最少年限</b>：<b>暂不纳入评分</b>，字段保留但禁用，等评分模型稳定再启用。
+      </td></tr>
+  <tr><td><b>岗位推荐</b></td>
+      <td>筛选条件 / 候选岗位卡（可折叠）</td>
+      <td>
+        ① <b>评分公式改为</b>：职位名 30 + 技能 30 + 城市 <b>20</b> + 薪资 <b>20</b>
+           （去掉经验 15 分；城市、薪资权重各提 5 分）。<br>
+        ② <b>岗位卡折叠</b>：默认只显示 岗位名 / 公司 / 薪资 / 地点 / 学历 / 年限 / 分数；
+           展开才显示命中与缺口明细。<br>
+        ③ <b>操作按钮在评分下方，三枚<b>同行横排</b></b>：<br>
+           &nbsp;&nbsp;• <b>简历匹配优化</b>（原「优化这份简历」改名）→ 走第八章的四步流程<br>
+           &nbsp;&nbsp;• <b>投递简历</b>（<b>从简历优化里独立出来</b>，与优化并列）<br>
+           &nbsp;&nbsp;• 打开岗位<br>
+        ④ <b>投递的两条路径</b>：<br>
+           &nbsp;&nbsp;• 该岗位<b>做过简历匹配优化</b> → 直接投递<b>优化后的那份</b>（不再问）<br>
+           &nbsp;&nbsp;• <b>没做过</b> → 弹<b>历史简历推荐</b>：把用户简历模块里的历史简历
+             按<b>对该岗位的匹配度</b>排序，用户挑一份投递<br>
+        ⑤ 搜索关键词同样支持 AI 推荐。
+      </td></tr>
+  <tr><td><b>用户简历</b><br><span style="font-size:11px;color:#777">（原「简历模板」模块）</span></td>
+      <td>上：简历模板库 + 上传自定义模板 + 智能选模板<br>下：用户简历档案列表</td>
+      <td>
+        <b>① 简历模板库</b>：4 套内置 —— <code>classic</code> 经典单栏、<code>modern</code> 现代双栏、
+           <code>tech</code> 技术极客、<code>acad</code> 学术风。模板可<b>多选</b>，
+           「已选 N 套」实时更新。<br>
+        <b>② 上传自定义模板</b>（新功能）：支持 <code>.docx</code> / <code>.pdf</code> /
+           <code>.png</code> / <code>.jpg</code>，转换后加入模板库。<br>
+           &nbsp;&nbsp;• <b>只有一处上传入口</b>：模板库右下角的「＋ 上传模板」格子。
+             <b>不另开上传面板</b>，避免两处重复。<br>
+           &nbsp;&nbsp;• 选中文件后，<b>「转换并加入模板库」</b>按钮出现在模板库操作条上
+             （位置：<b>「预览完整效果」和「保存」之间</b>），按钮上直接显示文件名。<br>
+           &nbsp;&nbsp;• <b>上传说明收进模板库右上角的帮助按钮（?）</b>，
+             点开是浮层，不占版面。<br>
+           &nbsp;&nbsp;• <b>Word</b>：解析版式参数（页边距、字号、栏数、字体、间距）→ 生成
+             <b>HTML 模板</b>。精度最高，推荐优先用。<br>
+           &nbsp;&nbsp;• <b>PDF / 图片</b>：按视觉还原成 <b>HTML 底图 + 文本层</b>的混合模板
+             （原图作底，文字叠在上面）。还原度取决于图片清晰度，UI 里要提示用户。<br>
+           &nbsp;&nbsp;• 转换<b>全部在本机完成</b>，不调大模型。<br>
+        <b>③ 模板库统一存 HTML 模板</b>（判定）：内置和上传的都用同一份 HTML + CSS 结构，
+           缩略图 = 同一模板的缩小渲染。这样一套渲染器吃下所有模板，
+           生成简历时不必区分来源。Word 原始文件留作溯源，PDF/图片另存底图资源。<br>
+        <b>④ 智能选模板</b>：两个开关 —— 「由 Agent 按 JD 自行推荐模板」
+           （读 JD 后挑版式）、「只在你勾选的模板里挑」（一个都没勾时回退到全部）。<br>
+        <b>⑤ 用户简历档案</b>（新功能）：<br>
+           &nbsp;&nbsp;• <b>投递成功的简历自动存一份 PDF</b>进这个列表<br>
+           &nbsp;&nbsp;• <b>自动打标签</b>：标签来自岗位方向 + 命中技能 + 目标岗位关键词<br>
+           &nbsp;&nbsp;• 这些标签就是<b>后续岗位简历评分推荐的依据</b><br>
+           &nbsp;&nbsp;• 每份记录：文件名 / 日期 / 用的模板 / 投递几家 / 几家回复 / 标签<br>
+           &nbsp;&nbsp;• 操作：预览、下载、设为默认
+      </td></tr>
+  <tr><td><b>平台接入</b></td>
+      <td>登录态体检 / 平台列表（每站带「高级」）/ 全局控制</td>
+      <td>
+        ① <b>风控与安全下沉到每个 adapter</b>：不再有全局区块，每个平台展开自己的「高级」面板：<br>
+           &nbsp;&nbsp;• 允许投递简历（默认关）<br>
+           &nbsp;&nbsp;• 每日投递上限（BOSS 是「打招呼上限」，智联是「投递上限」）<br>
+           &nbsp;&nbsp;• 跳过外包 / 劳务派遣<br>
+           &nbsp;&nbsp;• BOSS 专属：遇到风控自动降速（code 37 → 间隔拉到 60 秒 + 通知）<br>
+           &nbsp;&nbsp;• 智联专属：抓取详情页开关（关掉快 3 倍但没 JD）<br>
+        ② 全局只留 <b>PAUSE 总闸</b> 和「暂缓接入的平台」提示。<br>
+        ③ 广西人才网、重庆人社 <b>暂不接入</b>，不出现在平台列表里。
+      </td></tr>
+  <tr><td><b>日报</b></td>
+      <td>今日日报（首位）/ 推送内容（含高级）</td>
+      <td>
+        ① <b>模块顺序</b>：<b>「今日日报」放首位</b>（完整明细，用户最常看的内容），
+           「推送内容」放其次。<br>
+        ② <b>没有独立的「定时推送」模块</b>。定时与推送的所有细项
+           （自动抓取开关、只推当天新岗位、每次最多几条、失败也通知、抓取时段）
+           <b>全部整合进「推送内容」面板右上角的「高级」按钮</b>，默认折叠。
+           面板标题栏只留一句摘要（例：每 6 小时 · 下次 13:02）。<br>
+        ③ <b>推送格式精简</b>：每条消息只含 <code>岗位名 · 城市</code> + 岗位链接，
+           <b>不带分数、不带命中理由</b>。一条岗位一条消息，不合并。<br>
+        ④ 链接不计入 50 字限制。<br>
+        ⑤ 日报 Markdown 文件里保留完整明细（分数、命中、缺口、链接），推送只是索引。
+      </td></tr>
+</table>
+
+<div class="ok">
+  <b>主题（用户 2026-10-26 明确）</b><br>
+  设置页<b>不提供自己的主题选择器</b>，只跟随 Hermes：在 Hermes 设置里换皮肤，
+  插件 UI 同步变化。实现方式 = CSS 直接消费 Hermes 桌面的 <code>--dt-*</code> 变量，
+  宿主切皮肤时变量一变，插件页自动跟着变。<br>
+  落地细节见 skill：<code>hermes-theme-colors</code>。
+</div>
+
+<h2>八、简历生成流程</h2>
+<p class="sub">由岗位卡上的「简历匹配优化」触发，四步，每步都能中止。</p>
+<table>
+  <tr><th style="width:6%">步</th><th style="width:28%">动作</th><th>约束</th></tr>
+  <tr><td>1</td><td>读该岗位 JD 全文</td><td>从已登录的浏览器取，不额外登录、不重新抓列表</td></tr>
+  <tr><td>2</td><td>挑出 JD 核心要求</td><td>技能 / 学历 / 年限 / 关键词</td></tr>
+  <tr><td>3</td><td>对照用户经历，标出可写进简历的点</td>
+      <td><b>只重组用户写过的内容</b>，不编造没出现过的经历</td></tr>
+  <tr><td>4</td><td>按模板生成简历</td>
+      <td>模板来自「用户简历」模块；开启智能选模板时由 Agent 按 JD 挑版式</td></tr>
+</table>
+<div class="warn">
+  <b>投递永远是另一道手动确认。</b>生成 ≠ 投递。生成结果先给预览，
+  用户确认后才保存/导出；投递仍需单独点头。关闭「允许投递简历」时插件永远只读。
+</div>
+
+<h2>九、投递与简历档案流转（2026-10-26 新增）</h2>
+<p class="sub">「简历匹配优化」与「投递简历」拆成两个独立动作，投递会留下档案。</p>
+
+<table>
+  <tr><th style="width:22%">场景</th><th style="width:26%">用户看到什么</th><th>系统做什么</th></tr>
+  <tr>
+    <td><b>先优化，再投递</b><br><span style="font-size:11px;color:#777">推荐路径</span></td>
+    <td>点「简历匹配优化」→ 走四步流程 → 完成后点「投递简历」</td>
+    <td>该岗位标记为 <code>optimized</code>，投递时<b>直接用优化后那份</b>，不再询问。
+        投递成功后存 PDF + 打标签进「用户简历」</td>
+  </tr>
+  <tr>
+    <td><b>直接投递，没优化过</b></td>
+    <td>点「投递简历」→ <b>弹历史简历推荐</b>：列出历史简历，
+        每份显示<b>对该岗位的匹配分</b>，默认选中最高分那份</td>
+    <td>用 <code>resume_matcher.py</code> 给每份历史简历按标签 × 岗位要求打分排序。
+        用户选定后投递该份，并同样存 PDF + 打标签</td>
+  </tr>
+</table>
+
+<div class="note">
+  <b>只有两态，不做第三种。</b>用户自己会判断 —— 历史简历列表为空时，
+  弹层自然显示空列表，用户看到「没有可用简历」就明白了，不需要专门做一个
+  「引导去优化」的分支。少一个分支少一份逻辑。
+</div>
+
+<div class="note">
+  <b>简历标签从哪来</b>：投递时把「目标岗位方向 + 该岗 JD 命中技能 + 岗位关键词」
+  打成标签存在 PDF 简历旁边。下次遇到类似岗位时，<code>resume_matcher.py</code>
+  用这些标签去打分 —— 这就是「历史简历推荐」的排序依据。
+  标签只从<b>真实经历</b>和<b>实际命中项</b>来，不凭空生成。
+</div>
+
+<div class="warn">
+  <b>投递依然是不可逆动作。</b>不管走哪条路径，都必须过三道门：
+  每站自己的「允许投递简历」开关（默认关）→ 一次性确认令牌 → 该站每日上限。
+  选了历史简历<b>不等于</b>授权投递 —— 选定后还要走确认。
+</div>
+
+

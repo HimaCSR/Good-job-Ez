@@ -1,0 +1,42 @@
+# job-radar 个人画像示例
+#
+# 复制成 profile.yaml 后按自己的情况改：
+#   cp profile.example.yaml profile.yaml
+#
+# profile.yaml 已被 .gitignore 排除，不会进版本库。
+#
+# 格式是 JSON（去掉注释后的纯 JSON）。改的时候注意：
+#   - 字符串用双引号
+#   - 数组用 ["a", "b"]
+#   - 最后一项后面不要加逗号
+#
+# title_keywords：期望的岗位方向关键词，出现在岗位名/标签里就加分（每个 +10，最多 30）
+# skills：你的技能，JD 里提到就加分（按覆盖率折算 30 分）
+# city：期望城市，会跟岗位地点做包含匹配
+# min_experience_years：期望最少年限（暂不参与评分，留着备用）
+# min_salary：期望最低月薪（K），0 表示不要求
+# exclude_companies：出现这些词就跳过
+{
+  "title_keywords": [
+    "前端",
+    "web",
+    "three.js"
+  ],
+  "skills": [
+    "three.js",
+    "vue",
+    "typescript",
+    "node",
+    "javascript",
+    "html5",
+    "css",
+    "webgl"
+  ],
+  "city": "杭州",
+  "min_experience_years": 3,
+  "min_salary": 15,
+  "exclude_companies": [
+    "外包",
+    "劳务派遣"
+  ]
+}

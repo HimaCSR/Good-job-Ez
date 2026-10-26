@@ -1,0 +1,103 @@
+# ─────────────────────────────────────────────────────────────
+#  个人数据 —— 绝对不能进版本库
+# ─────────────────────────────────────────────────────────────
+# profile.yaml 里有你的画像（技能、城市、期望薪资）
+profile.yaml
+profile.*.yaml
+!profile.example.yaml
+
+# 简历原件、生成物、投递记录
+resume/
+resumes/
+drafts/
+uploads/
+*.docx
+*.pdf
+!docs/*.pdf
+!LICENSE
+
+# 任何含个人信息的表格
+*.xlsx
+*.csv
+
+# 照片 / 证件照
+photos/
+avatar*
+!docs/images/*.png
+
+# ─────────────────────────────────────────────────────────────
+#  运行时数据
+# ─────────────────────────────────────────────────────────────
+jobs.db
+jobs.db-journal
+jobs.db-wal
+*.db
+*.sqlite
+*.sqlite3
+reports/
+PAUSE
+pause
+
+# ─────────────────────────────────────────────────────────────
+#  Python
+# ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ─────────────────────────────────────────────────────────────
+#  Node / 前端
+# ─────────────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# ─────────────────────────────────────────────────────────────
+#  工具与缓存
+# ─────────────────────────────────────────────────────────────
+.cache/
+tmp/
+temp/
+*.log
+*.bak
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# bb-browser 本地私有 adapter（含站点密钥/cookie 相关逻辑，不应外泄）
+sites/
+.bb-browser/
+bb-sites/
+
+# 编辑器
+.vscode/
+.idea/
+*.code-workspace
+
+# ─────────────────────────────────────────────────────────────
+#  密钥 —— 双保险
+# ─────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets.json
+credentials.json
