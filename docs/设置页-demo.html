@@ -508,14 +508,53 @@ code { font-family: var(--mono); font-size: .92em; }
 }
 .modal-back.open { display: grid; }
 .modal {
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 20px 60px -20px rgba(0,0,0,.5); width: min(620px, 100%);
-  max-height: 86vh; overflow: auto;
+  width: min(560px, calc(100vw - 40px));
+  max-height: min(88vh, 820px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
 }
 .modal-head { padding: 15px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
 .modal-head h3 { margin: 0; font-size: 15px; font-weight: 620; }
-.modal-body { padding: 18px 20px; }
+.modal-body {
+  padding: 18px 20px;
+  overflow-y: auto;
+  max-height: min(62vh, 560px);
+}
 .modal-foot { padding: 13px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; background: var(--surface-2); }
+/* 优化结果面板 */
+.opt-result {
+  margin-top: 14px; padding: 12px 14px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  display: none;
+}
+.opt-result.show { display: block; }
+.opt-result h5 {
+  margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--ink-2);
+}
+.opt-line {
+  display: flex; align-items: baseline; gap: 8px; padding: 5px 0;
+  font-size: 12.5px; color: var(--ink-2); line-height: 1.5;
+  border-top: 1px dashed var(--border);
+}
+.opt-line:first-of-type { border-top: none; }
+.opt-basis {
+  flex: 0 0 auto; font-size: 11px; color: var(--warn);
+  background: var(--warn-soft); border-radius: 4px; padding: 1px 6px;
+  white-space: nowrap;
+}
+.opt-gap {
+  flex: 0 0 auto; font-size: 11px; color: var(--danger);
+  background: var(--danger-soft); border-radius: 4px; padding: 1px 6px;
+  white-space: nowrap;
+}
+.opt-note {
+  margin-top: 9px; font-size: 11.5px; color: var(--ink-3); line-height: 1.6;
+}
 .step { display: flex; align-items: center; gap: 10px; padding: 9px 0; font-size: 13px; }
 .step + .step { border-top: 1px solid var(--border); }
 .step-num {
@@ -823,7 +862,7 @@ code { font-family: var(--mono); font-size: .92em; }
                 <span class="caret">▶</span>
                 <div class="job-main">
                   <div class="job-title">web前端工程师</div>
-                  <div class="job-sub">杭州某某科技有限公司</div>
+                  <div class="job-sub">某科技有限公司有限公司</div>
                   <div class="job-meta">
                     <span>💰 1.5-1.8万</span>
                     <span>📍 杭州 拱墅 祥符</span>
@@ -831,7 +870,7 @@ code { font-family: var(--mono); font-size: .92em; }
                     <span>💼 3-5年</span>
                   </div>
                 </div>
-                <div class="job-side"><span class="score hi">73</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某公司">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-side"><span class="score hi">73</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某科技有限公司">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某科技有限公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
                 <div class="job-detail">
                 <div class="tag-label">职位名命中（+30）</div>
                 <div class="tagline">
@@ -859,7 +898,7 @@ code { font-family: var(--mono); font-size: .92em; }
                 <span class="caret">▶</span>
                 <div class="job-main">
                   <div class="job-title">web前端工程师</div>
-                  <div class="job-sub">某人力资源有限公司</div>
+                  <div class="job-sub">某人力资源有限公司资源有限公司</div>
                   <div class="job-meta">
                     <span>💰 面议</span>
                     <span>📍 杭州 钱塘 下沙</span>
@@ -867,7 +906,7 @@ code { font-family: var(--mono); font-size: .92em; }
                     <span>💼 1-3年</span>
                   </div>
                 </div>
-                <div class="job-side"><span class="score mid">63</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某公司">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-side"><span class="score mid">63</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某人力资源有限公司">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某人力资源有限公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
                 <div class="job-detail">
                 <div class="tag-label">职位名命中（+20）</div>
                 <div class="tagline"><span class="tag">前端</span><span class="tag">web</span></div>
@@ -892,7 +931,7 @@ code { font-family: var(--mono); font-size: .92em; }
                 <span class="caret">▶</span>
                 <div class="job-main">
                   <div class="job-title">web前端开发工程师</div>
-                  <div class="job-sub">某网络科技有限公司</div>
+                  <div class="job-sub">某网络科技有限公司网络科技有限公司杭州第四分公司</div>
                   <div class="job-meta">
                     <span>💰 面议</span>
                     <span>📍 杭州 余杭 五常</span>
@@ -900,7 +939,7 @@ code { font-family: var(--mono); font-size: .92em; }
                     <span>💼 3-5年</span>
                   </div>
                 </div>
-                <div class="job-side"><span class="score mid">60</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端工程师 / 某公司">简历匹配优化</button><button class="btn sm" data-apply="web前端工程师 / 某公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
+                <div class="job-side"><span class="score mid">60</span><div class="job-btns"><button class="btn primary sm" data-opt="web前端开发工程师 / 某网络科技有限公司">简历匹配优化</button><button class="btn sm" data-apply="web前端开发工程师 / 某网络科技有限公司">投递简历</button><a class="btn sm" href="#" style="text-decoration:none">打开岗位</a></div></div></div>
                 <div class="job-detail">
                 <div class="tag-label">职位名命中（+20）</div>
                 <div class="tagline"><span class="tag">前端</span><span class="tag">web</span></div>
@@ -1415,7 +1454,7 @@ code { font-family: var(--mono); font-size: .92em; }
 
         <div class="actions">
           <span style="font-size:12px;color:var(--ink-3)">
-            浏览器地址 <code>127.0.0.1:9222</code> · profile <code>&lt;你的 Chrome profile 路径&gt;</code>
+            浏览器地址 <code>127.0.0.1:9222</code> · profile <code>&lt;浏览器 profile 路径&gt;</code>
           </span>
           <span class="spacer"></span>
           <button class="btn">打开登录页</button>
@@ -1468,19 +1507,19 @@ code { font-family: var(--mono); font-size: .92em; }
             <div class="rp-meta">高分岗位（≥50 分）：3 条 ｜ 今日新增：2 条 ｜ 在库 54 条</div>
 
             <div class="rp-item">
-              <div class="rp-title">1. web前端工程师 — 杭州某某科技有限公司</div>
+              <div class="rp-title">1. web前端工程师 — 某科技有限公司有限公司</div>
               <div class="rp-why">匹配度 73 — 职位名命中: 前端、web、three.js；技能覆盖 5/8: three.js、javascript、html5、css、webgl；城市符合: 杭州 拱墅 祥符</div>
               <div class="rp-gap">缺口 技能未提及: vue、typescript、node</div>
             </div>
 
             <div class="rp-item">
-              <div class="rp-title">2. web前端工程师 — 某人力资源有限公司</div>
+              <div class="rp-title">2. web前端工程师 — 某人力资源有限公司资源有限公司</div>
               <div class="rp-why">匹配度 63 — 职位名命中: 前端、web；技能覆盖 5/8: vue、node、javascript、css、webgl；城市符合: 杭州 钱塘 下沙</div>
               <div class="rp-gap">缺口 技能未提及: three.js、typescript、html5</div>
             </div>
 
             <div class="rp-item">
-              <div class="rp-title">3. web前端开发工程师 — 某网络科技有限公司</div>
+              <div class="rp-title">3. web前端开发工程师 — 某网络科技有限公司网络科技有限公司杭州第四分公司</div>
               <div class="rp-why">匹配度 60 — 职位名命中: 前端、web；技能覆盖 4/8: vue、javascript、html5、css；城市符合: 杭州 余杭 五常</div>
               <div class="rp-gap">缺口 技能未提及: three.js、typescript、node、webgl</div>
             </div>
@@ -1607,7 +1646,13 @@ code { font-family: var(--mono); font-size: .92em; }
         投递仍然是另一道手动确认，不会自动投出去。
       </div>
     </div>
-    <div class="modal-foot">
+    <div class="opt-result" id="opt-result">
+  <h5>命中的经历（依据来自你写过的原文，不会编造）</h5>
+  <div id="opt-lines"></div>
+  <div class="opt-note" id="opt-note"></div>
+</div>
+
+<div class="modal-foot">
       <button class="btn" id="modal-cancel">取消</button>
       <span style="margin-left:auto"></span>
       <button class="btn primary" id="modal-run">开始优化</button>
@@ -1846,8 +1891,8 @@ parseBtn.addEventListener('click', () => {
   setTimeout(() => {
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
     set('f-name', '张三');
-    set('f-phone', '138 0000 0000');
-    set('f-email', 'user@example.com');
+    set('f-phone', '138 0000 1234');
+    set('f-email', 'chen@example.com');
     set('f-school', 'XX 大学');
     set('f-major', '软件工程');
     set('f-grad', '2024.06');
@@ -1975,6 +2020,54 @@ const steps = ['s1', 's2', 's3', 's4'].map(id => document.getElementById(id));
 function resetSteps() {
   steps.forEach(s => s.classList.remove('done', 'active'));
   steps[0].classList.add('active');
+  document.getElementById('opt-result').classList.remove('show');
+}
+
+// demo 用的假数据 —— 真实实现由 resume_builder 从用户经历 + JD 算出
+const DEMO_OPT = {
+  lines: [
+    { text: '主导公司 3D 数据可视化平台的架构与前端实现，使用 Vue + TypeScript + three.js', basis: '经历第 1 条' },
+    { text: '负责通用 WebGL 组件库建设，支持图表、模型、地图多种场景', basis: '经历第 2 条' },
+    { text: '搭建基于 Node.js 的构建与发布流程，缩短 CI 时间 40%', basis: '经历第 3 条' },
+  ],
+  gaps: ['css3', 'java'],
+};
+
+function fillOptResult() {
+  const box = document.getElementById('opt-lines');
+  const d = DEMO_OPT;
+  box.innerHTML = '';
+  d.lines.forEach(l => {
+    const row = document.createElement('div');
+    row.className = 'opt-line';
+    const txt = document.createElement('span');
+    txt.style.flex = '1';
+    txt.textContent = l.text;
+    const tag = document.createElement('span');
+    tag.className = 'opt-basis';
+    tag.textContent = '← 依据：' + l.basis;
+    row.appendChild(txt);
+    row.appendChild(tag);
+    box.appendChild(row);
+  });
+  if (d.gaps.length) {
+    const row = document.createElement('div');
+    row.className = 'opt-line';
+    const txt = document.createElement('span');
+    txt.style.flex = '1';
+    txt.textContent = '该岗位还要求，但你的经历里没有：';
+    row.appendChild(txt);
+    d.gaps.forEach(g => {
+      const tag = document.createElement('span');
+      tag.className = 'opt-gap';
+      tag.textContent = g;
+      row.appendChild(tag);
+    });
+    box.appendChild(row);
+  }
+  const note = document.getElementById('opt-note');
+  note.innerHTML = '缺口会原样列出来，<b>不会替你编</b>。正式简历里依据标注默认不显示。';
+  document.getElementById('opt-result').classList.add('show');
 }
 let currentOptJob = null;
 document.querySelectorAll('[data-opt]').forEach(b => {
@@ -2010,6 +2103,7 @@ document.getElementById('modal-run').addEventListener('click', () => {
       steps[3].classList.add('done');
       btn.disabled = false;
       btn.textContent = '完成';
+      fillOptResult();
       // 优化完成 → 该岗位标记为「已优化」，之后投递直接用这份
       if (currentOptJob) {
         optimizedJobs.add(currentOptJob);
