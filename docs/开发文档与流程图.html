@@ -1027,6 +1027,94 @@
   → CI 上 64 个测试直接能跑，不用装 Hermes。
 </div>
 
+<h2>十四、简历匹配优化落地（T14/T15 已实现，2026-10-27）</h2>
+
+<p>第八、九章是设计规格；这一章记录<b>实际实现</b>和实现过程中改掉的判断。</p>
+
+<h3>14.1 三个新模块</h3>
+<table>
+  <tr><th>文件</th><th>职责</th></tr>
+  <tr><td><code>resume_template.py</code></td>
+      <td>4 套内置模板（<code>classic</code> / <code>modern</code> / <code>tech</code> / <code>acad</code>），
+          共享一份 HTML 骨架 + CSS 变量</td></tr>
+  <tr><td><code>resume_builder.py</code></td>
+      <td>JD → 要求 → 经历证据 → 模板渲染，四步本地流程，<b>不调 LLM</b></td></tr>
+  <tr><td><code>resume_store.py</code></td>
+      <td>Chrome headless 导出 PDF；简历档案 + 标签；历史简历 × 岗位匹配分</td></tr>
+</table>
+
+<div class="note">
+  <b>缩略图和实际输出同源。</b>模板预览不是另画一张图，
+  是用<b>同一份 HTML</b> 渲染的 —— 不会出现「预览好看、导出来不一样」。
+</div>
+
+<h3>14.2 铁律：每条经历都能追溯</h3>
+<div class="warn">
+  生成结果的每一条 bullet 都带 <code>← 依据：经历第 N 条</code> 的定位，
+  原始片段另存在 <code>basis_text</code>。<br><br>
+  <b>正式输出默认隐藏标注</b>（那是预览用的），预览态可开。
+  <b>原始片段不贴进简历</b> —— 它和 bullet 是同一句话，
+  重复一遍没有信息量，还把简历撑得很长。
+</div>
+
+<p>用户不具备的技能一律进 <code>gaps</code>，<b>不编造、不暗示具备</b>。
+自动化测试里有一条专门断言：所有生成的 bullet 必须逐字出现在用户写过的原文里。</p>
+
+<h3>14.3 解析上踩过的坑</h3>
+<table>
+  <tr><th>问题</th><th>根因</th><th>处理</th></tr>
+  <tr><td>JD tags 粘连<br><code>CSSJavaScriptERP</code></td>
+      <td>招聘站的 tags 字段不加分隔符</td>
+      <td>按已知技能名切分（<code>SKILL_ALIASES</code>）+ camelCase
+          + 全大写边界三层兜底</td></tr>
+  <tr><td>「经验不限」被当成 0 年</td>
+      <td>正则先命中了别处的数字</td>
+      <td>先扫「经验不限 / 不限经验」再决定要不要取年限</td></tr>
+  <tr><td>技能表被污染</td>
+      <td>把切分用的词（<code>erp</code> / <code>oa</code>）也写进了技能表</td>
+      <td>拆成两个表：<code>SKILL_ALIASES</code>（真技能）+
+          <code>SPLIT_ONLY</code>（只做切分边界）</td></tr>
+  <tr><td>章节标题重复两遍</td>
+      <td>章节名和条目标题同名</td>
+      <td>模板里判断 <code>e.title != sec.title</code> 才渲染条目标题</td></tr>
+</table>
+
+<h3>14.4 JD 从哪来</h3>
+<div class="note">
+  <b>列表页不返回 JD。</b>描述、要求、学历、年限全在详情页。<br><br>
+  所以优化流程会<b>按需抓一次详情页</b>（<code>bbclient.fetch_detail</code>），
+  抓完写回岗位表。抓到之前不做任何匹配。
+</div>
+
+<h3>14.5 接线</h3>
+<table>
+  <tr><th>层</th><th>新增</th></tr>
+  <tr><td>工具</td>
+      <td><code>job_radar_resume_optimize</code> / <code>job_radar_resume_list</code>（共 8 个）</td></tr>
+  <tr><td>API</td>
+      <td><code>/resume/optimize</code> / <code>/resume/requirements</code> / <code>/resume/list</code></td></tr>
+  <tr><td>桌面端</td>
+      <td>岗位卡「简历匹配优化」弹窗（切依据标注、存档案）；简历列表改读 <code>/resume/list</code></td></tr>
+</table>
+
+<h3>14.6 PDF 输出</h3>
+<p>走本机 Chrome headless（<code>--print-to-pdf</code>），
+不装 weasyprint / reportlab —— 还原度更好，零新依赖。</p>
+<div class="note">
+  <code>@page { size: A4; margin: 14mm 16mm; }</code> 决定纸面大小和留白。
+  屏幕预览另给一份 <code>@media screen</code> 的内边距，
+  打印时 <code>@page</code> 会再算一次，两者不冲突。
+</div>
+
+<h3>14.7 还没做的</h3>
+<ul>
+  <li><b>Word / 图片模板上传与转换</b> —— 接口留了位置，还没实现</li>
+  <li><b>投递动作</b> —— 仍然只生成，不投递。投递闸门要用户明确确认</li>
+  <li><b>历史简历推荐弹层</b> —— 匹配分算法已有
+      （<code>resume_store.resume_matches</code>），UI 还没接</li>
+  <li><b>经历结构化</b> —— 现在只有自由文本，缺公司名和时间</li>
+</ul>
+
 </body>
 </html>
 
