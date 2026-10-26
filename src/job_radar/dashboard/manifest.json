@@ -1,0 +1,12 @@
+{
+  "label": "好岗好找",
+  "description": "定时抓取招聘网站岗位，按个人画像打分，生成日报并推送到 QQ",
+  "icon": "Puzzle",
+  "version": "0.1.0",
+  "tab": {
+    "path": "/job-radar",
+    "position": "end"
+  },
+  "api": "plugin_api.py",
+  "entry": "dist/index.js"
+}
