@@ -98,3 +98,33 @@ class TestBuildPush(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestUrlNotSplit(unittest.TestCase):
+    """URL 不能被切成两半 —— 切了就点不开。"""
+
+    def test_url_survives_split(self):
+        text = ("web前端开发工程师 · 杭州拱墅\n"
+                "https://www.zhaopin.com/jobdetail/CC3985.htm")
+        parts = split_for_qq(text, limit=50)
+        joined = "".join(parts)
+        self.assertIn("https://www.zhaopin.com/jobdetail/CC3985.htm", joined)
+        # 没有任何一段以 "//" 开头（那是被切断的链接）
+        for p in parts:
+            self.assertFalse(p.startswith("//"), p)
+
+    def test_two_urls_stay_whole(self):
+        text = ("标题很长很长很长很长很长很长很长很长很长很长很长\n"
+                "https://a.example.com/one\nhttps://b.example.com/two")
+        parts = split_for_qq(text, limit=50)
+        joined = "".join(parts)
+        self.assertIn("https://a.example.com/one", joined)
+        self.assertIn("https://b.example.com/two", joined)
+
+    def test_format_job_url_intact(self):
+        url = "https://www.zhaopin.com/jobdetail/CC398533130J40905945205.htm"
+        job = {"title": "web前端开发工程师", "company": "某人力资源有限公司",
+               "city": "杭州 拱墅", "score": 73, "url": url,
+               "reasons": ["职位名命中: 前端"]}
+        msgs = format_job(job)
+        self.assertIn(url, msgs)

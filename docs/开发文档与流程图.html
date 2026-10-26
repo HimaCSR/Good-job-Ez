@@ -483,8 +483,9 @@
 </div>
 
 </div>
-</body>
-</html>
+
+
+
 <h2>七、设置页规格（2026-10-26 用户确认后定稿）</h2>
 <p class="sub">UI demo：<code>job-radar/设置页-demo.html</code>。五个模块，主题跟随 Hermes。</p>
 
@@ -687,4 +688,120 @@
   ③ <code>python -m unittest discover -s tests</code> 全过<br>
   ④ README 里的安装步骤在干净环境能走通
 </div>
+<h2>十一、后端与桌面端落地（2026-10-26 已完成）</h2>
+<p class="sub">设置页从 HTML demo 变成 Hermes 桌面端真实插件：后端 API + 桌面 UI。</p>
+
+<h3>11.1 三层结构</h3>
+<table>
+  <tr><th style="width:22%">层</th><th style="width:30%">位置</th><th>职责</th></tr>
+  <tr><td><b>后端 API</b></td>
+      <td><code>dashboard/plugin_api.py</code><br>
+          + <code>dashboard/manifest.json</code></td>
+      <td>挂在 <code>/api/plugins/job-radar/</code>，9 个端点：
+          <code>GET /config /jobs /runs /login /report /resumes /templates</code>、
+          <code>POST /settings /profile /templates</code></td></tr>
+  <tr><td><b>桌面 UI</b></td>
+      <td><code>desktop/plugin.js</code></td>
+      <td>React 设置页，五个视图：个人信息 / 岗位推荐 / 用户简历 / 平台接入 / 日报</td></tr>
+  <tr><td><b>插件本体</b></td>
+      <td><code>*.py</code>（storage / matcher / report / push / tools …）</td>
+      <td>抓取、评分、日报、推送，6 个工具注册给 agent 用</td></tr>
+</table>
+
+<div class="note">
+  <b>后端路由靠 <code>dashboard/manifest.json</code> 挂载，不是 plugin.yaml。</b>
+  manifest 里写 <code>"api": "plugin_api.py"</code> 才会被 Hermes 发现；
+  没有这个文件，<code>_api_file</code> 为空，路由永远不挂 —— 表现是
+  <code>/api/plugins/job-radar/config</code> 一直 404。
+</div>
+
+<div class="warn">
+  <b>dashboard 层不能用相对导入。</b>
+  Hermes 把 <code>dashboard/plugin_api.py</code> 当独立模块加载
+  （module name = <code>hermes_dashboard_plugin_&lt;name&gt;</code>），没有父包，
+  <code>from . import storage</code> 必然 ImportError。
+  解法：把插件根目录注册成真包 <code>job_radar</code>，兄弟模块按依赖顺序加载
+  （config → matcher → storage → bbclient → report → push → login_check → tools）。
+  官方插件（kanban / hermes-achievements）也不这么写 —— 它们把逻辑放在自己文件里。
+</div>
+
+<h3>11.2 配置读写必须走 Hermes CLI</h3>
+<table>
+  <tr><th style="width:30%">操作</th><th>命令 / 理由</th></tr>
+  <tr><td><b>读</b></td>
+      <td><code>hermes config get plugins.entries.job-radar.settings</code><br>
+          自己解析 YAML 会漏掉块序列（<code>- 前端</code> 这种列表写法），
+          CLI 是 Hermes 自己的解析器，格式永远对得上</td></tr>
+  <tr><td><b>写</b></td>
+      <td><code>hermes config set plugins.entries.job-radar.settings.&lt;key&gt; &lt;value&gt;</code><br>
+          <b>不要手写 config.yaml</b> —— 缩进错会把整个 <code>job-radar:</code>
+          节点变成空节点，回读全丢（踩过一次）</td></tr>
+  <tr><td><b>CLI 定位</b></td>
+      <td><code>$HERMES_HOME/hermes-agent/.hermes/bin/hermes</code><br>
+          <code>python -m hermes_cli</code> <b>不行</b> —— 那是包，没有 <code>__main__</code></td></tr>
+</table>
+
+<h3>11.3 桌面端三个入口</h3>
+<table>
+  <tr><th style="width:26%">入口</th><th style="width:38%">写法</th><th>出现在哪</th></tr>
+  <tr><td><b>Settings ▸ Plugins</b></td>
+      <td><code>ctx.registerSettingsPage({id,title,icon,render,children})</code></td>
+      <td><b>主入口</b>，children 就是五个子页</td></tr>
+  <tr><td>左侧栏</td>
+      <td><code>ctx.register({area:SIDEBAR_NAV_AREA, data:{path,label,codicon}})</code></td>
+      <td>侧栏一行「好岗好找」</td></tr>
+  <tr><td>路由</td>
+      <td><code>ctx.register({area:ROUTES_AREA, data:{path}, render})</code></td>
+      <td><code>/job-radar</code></td></tr>
+</table>
+
+<div class="note">
+  <b>桌面半边默认是禁用的。</b>
+  <code>plugins/&lt;name&gt;/desktop/plugin.js</code> 会被 Electron 复制到
+  <code>$HERMES_HOME/desktop-plugins/&lt;name&gt;/</code> 并写
+  <code>.hermes-package.json</code> marker；
+  <b>有 marker 的插件 <code>defaultEnabled=false</code></b>
+  （安全设计 GHSA-mcfc-hp25-cjv7），必须在 Settings ▸ Plugins 里手动启用一次。
+  桌面端看不到插件时先问用户「Plugins 页里能看见吗」，别怀疑代码写错。
+</div>
+
+<div class="note">
+  <b>改源码后桌面端不会立刻同步。</b>
+  桌面端 watch 的是 <code>desktop-plugins/&lt;name&gt;/plugin.js</code>（副本），
+  不是源目录。改完要手动同步，或让用户在 Plugins 页点 Rescan / 重启桌面端。
+</div>
+
+<h3>11.4 已验证的功能测试（2026-10-26）</h3>
+<table>
+  <tr><th style="width:26%">项</th><th>结果</th></tr>
+  <tr><td>单元测试</td>
+      <td>运行版 <b>50 个全过</b>；仓库版 42 个全过</td></tr>
+  <tr><td>插件体检</td>
+      <td><code>hermes plugins doctor</code> 通过，6 个工具注册成功</td></tr>
+  <tr><td>配置读写</td>
+      <td>CLI 读出 keywords/city/min_score 等全部正确；POST 回写闭环通过</td></tr>
+  <tr><td>登录态体检</td>
+      <td>BOSS 已登录（zp_at，12 天）、智联已登录（at/rt，7 天）</td></tr>
+  <tr><td>匹配评分</td>
+      <td>四项权重生效，理由/缺口正确产出；非目标岗位 20 分被自然压低</td></tr>
+  <tr><td>岗位池</td>
+      <td>98 条真实岗位，16 条 ≥50 分</td></tr>
+  <tr><td>日报</td>
+      <td>Markdown 完整生成，含匹配理由、技能缺口、链接</td></tr>
+  <tr><td>QQ 分条</td>
+      <td>每条 ≤50 字符；<b>URL 不再被切断</b>（本次修复）</td></tr>
+  <tr><td>API 端点</td>
+      <td>9 个端点全部 200 且返回真实数据</td></tr>
+</table>
+
+<div class="note">
+  <b>本次修掉的三个真 bug</b>：<br>
+  ① 缺 <code>dashboard/manifest.json</code> → 后端路由压根没挂上（一直 404）<br>
+  ② dashboard 层相对导入 → 全部端点 ImportError<br>
+  ③ <code>split_for_qq</code> 会把 URL 切成两半 → 链接点不开
+</div>
+
+</body>
+</html>
+
 

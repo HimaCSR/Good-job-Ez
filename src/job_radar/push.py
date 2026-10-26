@@ -4,6 +4,7 @@
 这个模块负责生成那些消息片段（纯函数，可单测），发送由 gateway 负责。
 """
 
+import re
 
 # 强断点：句子/分句结束。弱断点：词内分隔符。硬切时绝不能落进 ASCII 单词里。
 _STRONG_SEP = "。！？；\n"
@@ -52,14 +53,21 @@ def split_for_qq(text, limit=50):
 
     优先在句末标点处断开；一句话本身就超长时，按 limit 硬切，
     但不会把英文单词从中间劈开（javascript → javas + cript）。
+
+    **URL 行不拆。** 链接被切成两半就点不开了 —— 宁可这条超长，
+    平台对 URL 本来就有豁免。
     """
     if not text:
         return []
     if len(text) <= limit:
         return [text]
+
     parts, rest = [], text
     while len(rest) > limit:
-        cut = _safe_cut(rest, limit)
+        # 当前这段以 URL 开头（可能带前导文字）→ 先把 URL 完整切出来
+        cut = _url_boundary(rest, limit)
+        if cut is None:
+            cut = _safe_cut(rest, limit)
         if cut <= 0:
             cut = limit
         piece = rest[:cut].strip()
@@ -70,6 +78,31 @@ def split_for_qq(text, limit=50):
     if tail:
         parts.append(tail)
     return [p for p in parts if p]
+
+
+_URL_RE = re.compile(r"https?://[^\s<>\"']+")
+
+
+def _url_boundary(text, limit):
+    """切分点：让下一段从一个完整 URL 的开头开始。
+
+    返回切分长度；这一段里没有需要保护的 URL 时返回 None。
+
+    场景：「正文… https://example.com/very/long/path」在 limit 处硬切，
+    结果前半段的 https: 和后半段的 //example.com 分家 ——
+    这里把切点推到 URL 之前，URL 完整落到下一段。
+    """
+    m = _URL_RE.search(text)
+    if not m:
+        return None
+    start = m.start()
+    if start == 0:
+        # 这一段就是 URL —— 整条不切，交给调用方原样发出
+        return len(text)
+    if start >= limit:
+        return None
+    # URL 起点在 limit 之内 → 在 URL 前切开，URL 完整进下一段
+    return start
 
 
 def format_job(job, index=None):
