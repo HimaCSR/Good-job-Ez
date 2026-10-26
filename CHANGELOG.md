@@ -9,6 +9,22 @@
 
 ## [未发布]
 
+### 新增
+
+- **定时任务改为脚本模式（不经过 LLM）**
+  - `examples/job_radar_cron.py` → 装到 `~/.hermes/scripts/`
+  - `hermes cron edit <id> --script job_radar_cron.py --no-agent`
+  - **完全不烧 token**，脚本 stdout 直接投递到 QQ；空输出 = 静默
+- **岗位推送去重**：`jobs` 表新增 `pushed_at` 列，只推没推过的岗位
+
+### 修复
+
+- **推送格式还是旧版**：一直带着分数和命中理由，用户早就定了「只发岗位名 · 城市 + 链接」
+- **同一个岗位被反复推送**：`only_new=true` 只看「最近一天首次出现」，
+  而 `INSERT OR REPLACE` 每次抓取都重置 `first_seen` 和 `pushed_at`，
+  导致判据失效。改成 `ON CONFLICT DO UPDATE` —— 只更新变化字段，
+  保留首次出现时间和推送标记
+
 ### 计划中
 
 - **简历匹配优化**：读岗位 JD → 挑核心要求 → 对照真实经历 → 按模板生成定向简历

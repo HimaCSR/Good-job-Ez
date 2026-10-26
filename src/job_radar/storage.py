@@ -57,12 +57,20 @@ CREATE TABLE IF NOT EXISTS runs (
 """
 
 
+def _ensure_columns(conn):
+    """给老库补列（schema 改了但库是旧的）。"""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
+    if "pushed_at" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN pushed_at TEXT")
+
+
 def _conn():
     d = plugin_data_dir("job-radar")
     os.makedirs(d, exist_ok=True)
     conn = sqlite3.connect(os.path.join(d, "jobs.db"))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _ensure_columns(conn)
     return conn
 
 
@@ -74,12 +82,25 @@ def upsert(job, scored):
     with _conn() as conn:
         cur = conn.execute("SELECT 1 FROM jobs WHERE job_id = ?", (jid,))
         is_new = cur.fetchone() is None
+        # **不能用 INSERT OR REPLACE** —— 它先删旧行再插入，
+        # first_seen 和 pushed_at 会被重置：
+        #   · first_seen 每次抓取都变 → 「今日新增」永远等于全部
+        #   · pushed_at 每次清空 → 同一个岗位被反复推
+        # 用 ON CONFLICT DO UPDATE：只更新变化的字段，保留首次出现时间和推送标记。
         conn.execute(
-            """INSERT OR REPLACE INTO jobs
+            """INSERT INTO jobs
                (job_id, source, title, company, salary, city, experience, degree,
                 skills, url, description, score, reasons, missing,
                 first_seen, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(job_id) DO UPDATE SET
+                 source=excluded.source, title=excluded.title,
+                 company=excluded.company, salary=excluded.salary,
+                 city=excluded.city, experience=excluded.experience,
+                 degree=excluded.degree, skills=excluded.skills,
+                 url=excluded.url, description=excluded.description,
+                 score=excluded.score, reasons=excluded.reasons,
+                 missing=excluded.missing, last_seen=excluded.last_seen""",
             (jid, job.get("source", ""), job.get("title", ""),
              job.get("company", ""), job.get("salary", ""),
              job.get("area") or job.get("city", ""),
@@ -145,6 +166,44 @@ def get_job(job_id):
     d["missing"] = json.loads(d.get("missing") or "[]")
     d.setdefault("area", d.get("city", ""))
     return d
+
+
+def unpushed_jobs(days=1, min_score=0, limit=50):
+    """还没推过的岗位（pushed_at 为空），按分数倒序。
+
+    这是「只推新岗位」的判据 —— 不能靠 status 字段，
+    那是用户自己标记 interested/applied/ignored 用的。
+    """
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM jobs
+               WHERE pushed_at IS NULL
+                 AND first_seen >= datetime('now', ?)
+                 AND score >= ?
+               ORDER BY score DESC, first_seen DESC
+               LIMIT ?""",
+            ("-%d days" % days, min_score, limit)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["tags"] = json.loads(d.get("skills") or "[]")
+        d["reasons"] = json.loads(d.get("reasons") or "[]")
+        d["missing"] = json.loads(d.get("missing") or "[]")
+        d.setdefault("area", d.get("city", ""))
+        out.append(d)
+    return out
+
+
+def mark_pushed(job_ids):
+    """标记这些岗位已推送。返回标记了几条。"""
+    if not job_ids:
+        return 0
+    now = _now()
+    with _conn() as conn:
+        conn.executemany(
+            "UPDATE jobs SET pushed_at = ? WHERE job_id = ?",
+            [(now, jid) for jid in job_ids])
+    return len(job_ids)
 
 
 def set_status(job_id, status):

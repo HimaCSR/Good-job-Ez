@@ -106,25 +106,28 @@ def _url_boundary(text, limit):
 
 
 def format_job(job, index=None):
-    """一条岗位 → 一到三条短消息。每条都 <=50 字。"""
-    title = job.get("title") or "(无标题)"
-    company = job.get("company") or "?"
-    area = job.get("area") or job.get("city") or "地点未知"
-    score = job.get("score", 0)
-    url = job.get("url") or ""
-    reasons = job.get("reasons") or []
+    """一条岗位 → 两条短消息：标题行 + 链接。
 
-    head = "🔔 %s" % title
+    **格式（2026-10-26 用户定）**：
+    ```
+    web前端开发工程师 · 杭州拱墅
+    https://www.zhaopin.com/jobdetail/CC3985.htm
+    ```
+    **不带分数、不带命中理由** —— 完整明细在日报 Markdown 文件里，
+    推送只是索引。
+
+    每条 ≤50 字符（URL 除外）。
+    """
+    title = job.get("title") or "(无标题)"
+    area = job.get("area") or job.get("city") or ""
+    url = job.get("url") or ""
+
+    head = title
+    if area:
+        head = "%s · %s" % (title, area)
     if len(head) > 48:
         head = head[:47] + "…"
     msgs = [head]
-
-    line2 = "%s · %s · 匹配度 %s" % (company, area, score)
-    msgs.extend(split_for_qq(line2))
-
-    if reasons:
-        why = "；".join(reasons)
-        msgs.extend(split_for_qq("命中：" + why))
 
     if url:
         # URL 不能拆（拆了就点不开），超长时原样发出。

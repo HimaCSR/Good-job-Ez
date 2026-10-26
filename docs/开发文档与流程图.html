@@ -64,7 +64,7 @@
 <div class="page">
 
   <h1>好岗好找 · Good-job-Ez 插件</h1>
-  <p class="sub">开发文档与工作流程图 · Hermes Plugin for Windows 11 · v0.2.0 设计稿</p>
+  <p class="sub">开发文档与工作流程图 · Hermes Plugin for Windows 11 · v0.3.0（含工程化）</p>
 
   <div class="legend">
     <span class="lg-read">① 采集层 · 只读</span>
@@ -379,14 +379,53 @@
   </div>
 
   <h2>五、目录结构</h2>
+<p class="sub">左边是已实现的，右边是规划中的（还没写就别找）。</p>
+
   <table>
     <tr><th style="width:34%">路径</th><th>内容</th></tr>
-    <tr><td><code>~/.hermes/plugins/job-radar/</code></td>
-        <td>Hermes 插件本体：plugin.yaml、tools.py、matcher.py、bbclient.py、storage.py、report.py、resume.py、tokens.py、profile.yaml、tests/</td></tr>
+    <tr><td colspan="2" style="background:var(--surface-2)"><b>① 已实现 —— 插件本体</b></td></tr>
+    <tr><td><code>plugins/job-radar/</code></td>
+        <td>Hermes 插件本体。<b>开发时是仓库 <code>src/job_radar/</code> 的 junction</b>，
+            改代码即生效</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ plugin.yaml</code></td>
+        <td>插件元数据 + <code>config_schema</code>（设置项的默认值与说明）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ __init__.py</code></td>
+        <td>注册 6 个工具给 agent 用</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ tools.py</code></td>
+        <td>工具实现：scan / daily / list / mark / push / login_status</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ matcher.py</code></td>
+        <td><b>本地打分</b>：职位名 30 + 技能 30 + 城市 20 + 薪资 20 → 0~100 分，
+            输出命中理由与技能缺口</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ bbclient.py</code></td>
+        <td>调 bb-browser 跑 adapter（只读），带限速与耗时统计</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ storage.py</code></td>
+        <td>SQLite：<code>jobs</code>（岗位池）、<code>runs</code>（抓取记录）、
+            <code>resumes</code> / <code>resume_templates</code>（简历与模板）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ report.py</code></td>
+        <td>Markdown 日报生成</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ push.py</code></td>
+        <td>QQ 消息拆分（每条 ≤50 字，URL 不断）</td></tr>
     <tr><td><code>&nbsp;&nbsp;├─ login_check.py</code></td>
         <td><b>登录态体检</b>：凭证 → 状态 / 剩余天数（纯函数，可单测）</td></tr>
     <tr><td><code>&nbsp;&nbsp;├─ browser_cookies.py</code></td>
         <td>走 CDP <code>Storage.getCookies</code> 读 cookie（不落盘、不进日志）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ logging_setup.py</code></td>
+        <td><b>运行日志</b>：双层输出 + 凭证自动打码 + 轮转</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ config.py</code></td>
+        <td>读 Hermes 配置（ctx 注入）+ 个人画像</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ dashboard/manifest.json</code></td>
+        <td>让 Hermes 挂载后端路由（<b>缺了它 API 永远 404</b>）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ dashboard/plugin_api.py</code></td>
+        <td>设置页后端：11 个端点（配置 / 画像 / 岗位 / 抓取记录 / 登录态 /
+            日报 / 简历 / 模板 / 日志）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ desktop/plugin.js</code></td>
+        <td>桌面端 React 设置页（纯 ESM，五个视图）</td></tr>
+    <tr><td><code>&nbsp;&nbsp;├─ skills/usage/SKILL.md</code></td>
+        <td>插件自带技能，agent 可 <code>skill_view</code> 载入</td></tr>
+    <tr><td><code>&nbsp;&nbsp;└─ tests/</code></td>
+        <td>64 个单元测试（纯 stdlib，不需要装 Hermes）</td></tr>
+
+    <tr><td colspan="2" style="background:var(--surface-2)"><b>② 规划中 —— 还没写</b></td></tr>
     <tr><td><code>&nbsp;&nbsp;├─ resume_parser.py</code></td>
         <td><b>简历文档本地解析</b>：.docx/.pdf/.txt → 字段草稿。<b>不调大模型</b></td></tr>
     <tr><td><code>&nbsp;&nbsp;├─ ai_suggest.py</code></td>
@@ -402,89 +441,103 @@
         <td><b>历史简历 × 岗位打分</b>：拿简历标签与岗位要求算匹配度，给投递时的排序</td></tr>
     <tr><td><code>&nbsp;&nbsp;└─ site_config.py</code></td>
         <td><b>每平台独立的风控配置</b>（投递上限、跳过外包、风控降速…）</td></tr>
-    <tr><td><code>~/.hermes/plugins/job-radar/desktop/</code></td>
-        <td>设置页：<code>index.html</code>（消费 <code>--dt-*</code> 跟随 Hermes 皮肤）+ <code>plugin.js</code>（前后端桥）</td></tr>
-    <tr><td><code>~/.hermes/plugins/job-radar/dashboard/plugin_api.py</code></td>
-        <td>设置页后端：读写 profile.yaml / 配置 / 模板选择 / 抓取结果</td></tr>
+
+    <tr><td colspan="2" style="background:var(--surface-2)"><b>③ 私有数据 —— 绝不进仓库</b></td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/profile.yaml</code></td>
+        <td><b>个人画像</b>（技能、城市、期望薪资、真实经历）<br>
+            <b>已从插件目录迁出</b> —— 插件目录是指向 git 仓库的链接，
+            画像放那儿会被提交上去</td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/jobs.db</code></td>
+        <td>岗位池（SQLite）</td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/reports/</code></td>
+        <td>每日日报 Markdown</td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/logs/</code></td>
+        <td>运行日志（5 MB × 3 份轮转）</td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/resume/</code></td>
+        <td>投递成功的 PDF 简历 + 标签（规划中）</td></tr>
+    <tr><td><code>&lt;plugin-data&gt;/job-radar/uploads/</code></td>
+        <td>简历原件 + 模板原件（规划中）</td></tr>
+
+    <tr><td colspan="2" style="background:var(--surface-2)"><b>④ 外部</b></td></tr>
     <tr><td><code>~/.bb-browser/sites/</code></td>
-        <td>我写的私有 adapter（boss/*、zhaopin/*、huibo/*）<br>
+        <td>我写的私有 adapter（boss/*、zhaopin/*）<br>
             <b>gxrc/*、cqrs/* 暂缓开发</b></td></tr>
     <tr><td><code>~/.bb-browser/bb-sites/</code></td>
         <td>社区 adapter（只读，已克隆到本地）</td></tr>
     <tr><td><code>~/AppData/Local/hermes/tools/bb-browser/</code></td>
         <td>bb-browser 安装目录 + 固定 node 版本的包装脚本 bb.sh</td></tr>
-    <tr><td><code>~/AppData/Local/hermes/plugin-data/job-radar/</code></td>
-        <td>运行时数据：jobs.db、reports/、resume/（投递成功的 PDF 简历 + 标签）、drafts/、uploads/（简历原件 + 模板原件）、templates/（转换后的模板）、PAUSE</td></tr>
+    <tr><td><code>~/AppData/Local/hermes/desktop-plugins/job-radar/</code></td>
+        <td>桌面端自己的副本（由 Electron 从插件目录 materialize）</td></tr>
   </table>
 
+  <div class="note">
+    <b>开发模式：仓库是唯一真相源。</b><br>
+    <code>$HERMES_HOME/plugins/job-radar</code> ← junction →
+    <code>&lt;repo&gt;/src/job_radar</code>，改代码即生效，不用手工同步。<br>
+    切换用 <code>scripts/dev.sh link</code> / <code>unlink</code>（会自动备份）。
+    建 junction 要先停网关 —— 它 import 插件时锁着目录。
+  </div>
+
 <h2>六、开发阶段与验收</h2>
+<p class="sub">✅ 已完成 ｜ ⬜ 未开始 ｜ ⏸ 暂缓（用户 2026-10-26 决定）</p>
+
   <table>
-    <tr><th style="width:6%">阶段</th><th style="width:26%">交付物</th><th>验收标准</th></tr>
-    <tr><td><b>T0</b></td><td>跑通一次只读抓取</td>
+    <tr><th style="width:7%">阶段</th><th style="width:24%">交付物</th><th>验收标准</th></tr>
+    <tr><td>✅ <b>T0</b></td><td>跑通一次只读抓取</td>
         <td><code>site boss/search</code> 返回真实 JSON；<b>失败就停下问你，不绕过登录</b></td></tr>
-    <tr><td><b>T1</b></td><td>bb-browser 固定安装 + 包装脚本</td>
+    <tr><td>✅ <b>T1</b></td><td>bb-browser 固定安装 + 包装脚本</td>
         <td><code>bb.sh site list</code> 列出平台</td></tr>
-    <tr><td><b>T2</b></td><td>私有 adapter：boss/greet</td>
-        <td><code>site info boss/greet</code> 显示参数；抓包确认请求格式</td></tr>
-    <tr><td><b>T3</b></td><td>插件骨架</td>
-        <td><code>hermes plugins doctor . --ci</code> 退出码 0</td></tr>
-    <tr><td><b>T4</b></td><td>matcher.py + 单测</td>
-        <td>完美匹配 ≥90 分；错城市错技能 &lt;50 分；分数永不越界<br>
+    <tr><td>✅ <b>T2</b></td><td>私有 adapter：boss / zhaopin</td>
+        <td>返回统一词表 JSON；BOSS 15 条带薪资、智联 20 条登录后不打码</td></tr>
+    <tr><td>✅ <b>T3</b></td><td>插件骨架</td>
+        <td><code>hermes plugins doctor . --ci</code> 退出码 0，6 个工具注册成功</td></tr>
+    <tr><td>✅ <b>T4</b></td><td>matcher.py + 单测</td>
+        <td>目标岗 60~73 分、非目标岗 20 分；分数不越界；理由与缺口正确产出<br>
         <b>公式：职位名 30 + 技能 30 + 城市 20 + 薪资 20</b>（无经验项）</td></tr>
-    <tr><td><b>T5</b></td><td>bbclient.py / storage.py</td>
-        <td>限速生效；同 job_id 重复插入不新增行</td></tr>
-    <tr><td><b>T6</b></td><td>tools.py 工具集</td>
+    <tr><td>✅ <b>T5</b></td><td>bbclient.py / storage.py</td>
+        <td>限速生效；同 job_id 重复插入不新增行（实测 98 条岗位）</td></tr>
+    <tr><td>✅ <b>T6</b></td><td>tools.py 工具集</td>
         <td>全部返回 JSON 字符串、不抛异常</td></tr>
-    <tr><td><b>T7</b></td><td>日报 + 简历 + 草稿</td>
-        <td>日报含分数与链接；简历每条带「← 依据：」<br>
-        <b>推送只发「岗位名 · 城市 + 链接」</b>，不带分数与理由</td></tr>
-    <tr><td><b>T8</b></td><td>投递两步协议</td>
-        <td>不带令牌<b>不投递</b>；令牌一次性、过期失效</td></tr>
-    <tr><td><b>T9</b></td><td>多站 adapter</td>
-        <td>zhaopin / huibo 各自返回统一词表 JSON<br>
+    <tr><td>✅ <b>T7</b></td><td>日报 + 推送拆分</td>
+        <td>日报含分数、理由、缺口、链接；每条推送 ≤50 字，<b>URL 不断</b></td></tr>
+    <tr><td>✅ <b>T8</b></td><td>登录态体检</td>
+        <td>各站凭证剩余天数 + 风控 token 提醒；<b>只记状态不记值</b></td></tr>
+    <tr><td>✅ <b>T11</b></td><td>设置页（后端 + 桌面 UI）</td>
+        <td>11 个端点全 200；五视图；<b>主题跟随 Hermes</b></td></tr>
+    <tr><td>✅ <b>T19</b></td><td>运行日志</td>
+        <td>双层输出 + 轮转上限 20 MB；<b>凭证零泄漏</b>（实测 51 行无泄漏）</td></tr>
+    <tr><td>✅ <b>T20</b></td><td>工程化</td>
+        <td>CHANGELOG / CONTRIBUTING / ROADMAP / CI / 脱敏扫描 / dev.sh<br>
+        <b>64 个测试全过</b>，CI 上不需要装 Hermes</td></tr>
+    <tr><td>⬜ <b>T9</b></td><td>汇博 adapter</td>
+        <td>返回统一词表 JSON<br>
         <b>gxrc / cqrs 暂缓</b>（用户 2026-10-26 决定）</td></tr>
-    <tr><td><b>T10</b></td><td>挂 cron</td>
-        <td>到点推送，每条「岗位名 · 城市 + 链接」≤50 字（链接除外）；
-        连续两天不重复推同一岗位</td></tr>
-    <tr><td><b>T11</b></td><td>设置页（HTML demo 已确认）</td>
-        <td>五个模块能读写配置；<b>主题跟随 Hermes</b>（宿主换皮肤插件跟着变）</td>
-    </tr>
-    <tr><td><b>T12</b></td><td>简历文档本地解析</td>
-        <td>.docx/.pdf/.txt 解析出字段，<b>不调用大模型</b>；结果填成草稿待确认</td>
-    </tr>
-    <tr><td><b>T13</b></td><td>AI 推荐岗位方向 / 技能 / 关键词</td>
-        <td>从「真实经历」提取；<b>与简历导入区分</b>，这里允许调大模型</td>
-    </tr>
-    <tr><td><b>T14</b></td><td>简历模板库 + 渲染器</td>
-        <td>4 套模板；缩略图与实际输出同源；支持多选与 Agent 自动选模板</td>
-    </tr>
-    <tr><td><b>T15</b></td><td>简历生成四步流程</td>
-        <td>读 JD → 挑要求 → 对照经历 → 按模板生成；<b>不编造经历</b>；投递仍需手动确认</td>
-    </tr>
-    <tr><td><b>T16</b></td><td>投递两路径 + 历史简历推荐</td>
-        <td>已优化 → 直接投优化版；未优化 → 弹历史简历并按<b>对该岗匹配分</b>排序；
-        无历史简历 → 引导去优化</td>
-    </tr>
-    <tr><td><b>T17</b></td><td>用户简历档案（PDF + 标签）</td>
-        <td>投递成功的简历自动存 PDF 并打标签；列表能预览 / 下载 / 设默认；
-        标签可被 <code>resume_matcher</code> 读取</td>
-    </tr>
-    <tr><td><b>T18</b></td><td>自定义模板转换</td>
-        <td>.docx 抽版式 → HTML 模板；.pdf / 图片 → 底图+文本层；
+    <tr><td>⬜ <b>T10</b></td><td>挂 cron</td>
+        <td>到点推送，每条 ≤50 字（链接除外）；连续两天不重复推同一岗位</td></tr>
+    <tr><td>⬜ <b>T12</b></td><td>简历文档本地解析</td>
+        <td>.docx/.pdf/.txt 解析出字段，<b>不调用大模型</b>；结果填成草稿待确认</td></tr>
+    <tr><td>⬜ <b>T13</b></td><td>AI 推荐岗位方向 / 技能 / 关键词</td>
+        <td>从「真实经历」提取；<b>与简历导入区分</b>，这里允许调大模型</td></tr>
+    <tr><td>⬜ <b>T14</b></td><td>简历模板库 + 渲染器</td>
+        <td>4 套模板；缩略图与实际输出同源；支持多选与 Agent 自动选模板</td></tr>
+    <tr><td>⬜ <b>T15</b></td><td>简历生成四步流程</td>
+        <td>读 JD → 挑要求 → 对照经历 → 按模板生成；<b>不编造经历</b>；投递仍需手动确认</td></tr>
+    <tr><td>⬜ <b>T16</b></td><td>投递两路径 + 历史简历推荐</td>
+        <td>已优化 → 直接投优化版；未优化 → 弹历史简历并按<b>对该岗匹配分</b>排序<br>
+        <b>只有两态，没有「无历史简历 → 引导去优化」分支</b>（用户 2026-10-26 定）</td></tr>
+    <tr><td>⬜ <b>T17</b></td><td>用户简历档案（PDF + 标签）</td>
+        <td>投递成功的简历自动存 PDF 并打标签；列表能预览 / 下载 / 设默认；<br>
+        标签可被 <code>resume_matcher</code> 读取</td></tr>
+    <tr><td>⬜ <b>T18</b></td><td>自定义模板转换</td>
+        <td>.docx 抽版式 → HTML 模板；.pdf / 图片 → 底图+文本层；<br>
         转换后进模板库，与内置模板同一套渲染器</td></tr>
   </table>
 
- <div class="ok">
-  <b>给你的确认点</b><br>
-  1. 设置页 UI（<code>job-radar/设置页-demo.html</code>）看得过吗？哪里要调<br>
-  2. 后端先做哪块 —— 我建议 T11 设置页 + T16 投递两路径，因为这两块最贴近你的日常使用<br>
-  3. 风险档位默认「只读」，要不要一开始就开「半自动」？<br>
-  4. profile.yaml 里你的真实经历，谁来写？你口述我来填也行。
-</div>
-
-</div>
-
-
+ <div class="note">
+  <b>下一步做什么</b>：T10（挂 cron，让它自己跑起来）→ T14/T15（简历优化）
+  → T16/T17（投递与简历档案）。<br>
+  详细路线图见 <code>docs/ROADMAP.md</code>。
+ </div>
 
 <h2>七、设置页规格（2026-10-26 用户确认后定稿）</h2>
 <p class="sub">UI demo：<code>job-radar/设置页-demo.html</code>。五个模块，主题跟随 Hermes。</p>
@@ -697,9 +750,9 @@
   <tr><td><b>后端 API</b></td>
       <td><code>dashboard/plugin_api.py</code><br>
           + <code>dashboard/manifest.json</code></td>
-      <td>挂在 <code>/api/plugins/job-radar/</code>，9 个端点：
-          <code>GET /config /jobs /runs /login /report /resumes /templates</code>、
-          <code>POST /settings /profile /templates</code></td></tr>
+      <td>挂在 <code>/api/plugins/job-radar/</code>，<b>11 个端点</b>：
+          <code>GET /config /jobs /runs /login /report /resumes /templates /logs</code>、
+          <code>POST /settings /profile /templates /logs/purge</code></td></tr>
   <tr><td><b>桌面 UI</b></td>
       <td><code>desktop/plugin.js</code></td>
       <td>React 设置页，五个视图：个人信息 / 岗位推荐 / 用户简历 / 平台接入 / 日报</td></tr>
@@ -775,7 +828,7 @@
 <table>
   <tr><th style="width:26%">项</th><th>结果</th></tr>
   <tr><td>单元测试</td>
-      <td>运行版 <b>50 个全过</b>；仓库版 42 个全过</td></tr>
+      <td>运行版与仓库版各 <b>64 个全过</b></td></tr>
   <tr><td>插件体检</td>
       <td><code>hermes plugins doctor</code> 通过，6 个工具注册成功</td></tr>
   <tr><td>配置读写</td>
@@ -791,7 +844,7 @@
   <tr><td>QQ 分条</td>
       <td>每条 ≤50 字符；<b>URL 不再被切断</b>（本次修复）</td></tr>
   <tr><td>API 端点</td>
-      <td>9 个端点全部 200 且返回真实数据</td></tr>
+      <td>11 个端点全部 200 且返回真实数据</td></tr>
 </table>
 
 <div class="note">
@@ -799,6 +852,179 @@
   ① 缺 <code>dashboard/manifest.json</code> → 后端路由压根没挂上（一直 404）<br>
   ② dashboard 层相对导入 → 全部端点 ImportError<br>
   ③ <code>split_for_qq</code> 会把 URL 切成两半 → 链接点不开
+</div>
+
+
+
+<h2>十二、运行日志（2026-10-26 已落地）</h2>
+<p class="sub">出问题时能查清楚 —— 之前只有一个 <code>runs.error</code> 字段，多个错误挤在一起还截断。</p>
+
+<h3>12.1 为什么需要</h3>
+<table>
+  <tr><th style="width:26%">之前的盲区</th><th>说明</th></tr>
+  <tr><td><b>错误被吞成字符串</b></td>
+      <td><code>bbclient</code> 把异常包成 <code>{"error": "..."}</code> 返回，
+          中间过程（请求发了没、adapter 返回什么、耗时多少）全丢</td></tr>
+  <tr><td><b>错误挤成一坨</b></td>
+      <td><code>runs.error</code> 是 <code>"; ".join(errors)[:300]</code> ——
+          看不出是哪个站、哪个关键词出的问题</td></tr>
+  <tr><td><b>没有时间戳和耗时</b></td>
+      <td>抓取变慢了、被限流了，从旧日志里看不出来</td></tr>
+</table>
+
+<h3>12.2 两层输出</h3>
+<table>
+  <tr><th style="width:22%">层</th><th style="width:34%">去哪</th><th>上限</th></tr>
+  <tr><td><b>插件自己的文件</b></td>
+      <td><code>&lt;plugin-data&gt;/job-radar/logs/job-radar.log</code></td>
+      <td>RotatingFileHandler，5 MB × 3 份 ≈ <b>20 MB</b>，到点自动轮转</td></tr>
+  <tr><td><b>标准 logging</b></td>
+      <td>logger 名 <code>hermes_plugins.job_radar</code> →
+          Hermes 的 <code>agent.log</code> / <code>errors.log</code></td>
+      <td>Hermes 自己管（5 MB × 3 / 2 MB × 2）</td></tr>
+</table>
+
+<div class="note">
+  <b>不造新的日志系统。</b>Hermes 已经把插件日志收进
+  <code>agent.log</code> / <code>errors.log</code>，命名空间是
+  <code>hermes_plugins.&lt;模块名&gt;</code> —— 标准 <code>logging</code> 一接就进。
+  单独一份文件是为了排查时一眼看完，不被别的日志淹没。
+</div>
+
+<h3>12.3 埋点位置</h3>
+<table>
+  <tr><th style="width:26%">位置</th><th>记什么</th></tr>
+  <tr><td><code>bbclient.run_site</code></td>
+      <td>站点、参数、耗时、返回字节数、岗位条数、错误摘要</td></tr>
+  <tr><td><code>bbclient.polite_pause</code></td>
+      <td>这次停顿了多少秒（排查限流）</td></tr>
+  <tr><td><code>tools._fetch_site</code></td>
+      <td>哪个站 + 哪个关键词、抓到几条、失败原因</td></tr>
+  <tr><td><code>tools.scan</code></td>
+      <td>一轮总耗时、抓到 / 新增 / 命中 / 错误数</td></tr>
+  <tr><td><code>tools.daily</code> / <code>push</code></td>
+      <td>日报路径、推送条数</td></tr>
+  <tr><td><code>login_check</code></td>
+      <td>各站状态与凭证<b>名字</b>（不记值）</td></tr>
+  <tr><td>未捕获异常</td>
+      <td><code>log.exception</code> —— 带完整堆栈</td></tr>
+</table>
+
+<h3>12.4 凭证打码（两条红线）</h3>
+<div class="warn">
+  <b>日志里绝对不能出现凭证值。</b><br>
+  打码规则：已知凭证键（<code>zp_at</code> / <code>cookie</code> / <code>token</code> /
+  <code>authorization</code> …）的值换成 <code>[REDACTED]</code>；
+  40 位以上随机串也打码。<br>
+  <b>不被打码的</b>：状态描述（「已登录（凭证 zp_at），剩 12 天」）、
+  URL、公司名 —— 这些打了就没法排查。
+</div>
+
+<table>
+  <tr><th style="width:34%">坑</th><th>现象与解法</th></tr>
+  <tr><td>值含空格</td>
+      <td><code>Authorization: Bearer tok_123</code> 只打掉第一个词（Bearer），
+          真 token 漏了 → 凭证键的值允许跨空格</td></tr>
+  <tr><td>二次打码</td>
+      <td>刚生成的 <code>[REDACTED]</code> 被下一轮规则再打一次 →
+          <code>[REDACTED]]</code> → 负向断言 <code>(?!\[REDACTED)</code></td></tr>
+  <tr><td>formatter 原地改 record</td>
+      <td>一个 record 依次经过多个 handler，原地改 <code>record.msg</code>
+          会让第二个 handler 看到已改内容 →「文件里打码了、stderr 里没打码」
+          → 复制一份 record 再改</td></tr>
+  <tr><td>重复写两遍</td>
+      <td><code>logging.getLogger(name)</code> 拿到的是<b>全局共享对象</b>；
+          宿主和 dashboard 层各加载一次模块就 addHandler 两次
+          → 先看 <code>logger.handlers</code> 有没有</td></tr>
+  <tr><td>体检失败</td>
+      <td><code>plugins doctor</code> 把插件复制到临时目录再清理，
+          日志 handler 在那儿开文件 → WinError 32
+          → <b>懒加载</b>（第一次 emit 才开文件）+ 日志目录不跟随
+          <code>plugin_data_dir()</code></td></tr>
+</table>
+
+<h3>12.5 效果</h3>
+<div class="note">
+  日志上线<b>当场就抓到一个真 bug</b>：<br>
+  <code>matcher._salary_score</code> 的「8000-12000」分支没给 <code>unit</code> 赋值
+  → <code>UnboundLocalError</code>，扫描直接崩。<br>
+  之前一直没暴露，因为所有岗位薪资都是打码的 <code>**-**元</code>；
+  登录后拿到真实薪资才触发。<br>
+  <b>这就是加日志的价值</b>：堆栈直接指向行号，不用靠猜。
+</div>
+
+
+<h2>十三、工程化与开发流程（2026-10-26）</h2>
+<p class="sub">让后续的更新和开发不再靠「我记得同步一下」。</p>
+
+<h3>13.1 仓库结构</h3>
+<table>
+  <tr><th style="width:34%">路径</th><th>内容</th></tr>
+  <tr><td><code>src/job_radar/</code></td>
+      <td>插件本体（含 dashboard / desktop / tests）</td></tr>
+  <tr><td><code>docs/</code></td>
+      <td>开发文档与流程图（HTML + PDF）、设置页 demo、抓取层现状、<b>ROADMAP</b></td></tr>
+  <tr><td><code>examples/</code></td>
+      <td>配置示例、城市码速查、日报样例</td></tr>
+  <tr><td><code>scripts/</code></td>
+      <td><code>dev.sh</code>（命令入口）、<code>check-sensitive.sh</code>（脱敏）、
+          <code>check-repo.sh</code>（仓库卫生）</td></tr>
+  <tr><td><code>.github/workflows/ci.yml</code></td>
+      <td>push 自动跑测试（Python 3.11 / 3.12 / 3.13）+ 脱敏 + 卫生</td></tr>
+  <tr><td><code>CHANGELOG.md</code></td>
+      <td>改了什么、为什么改</td></tr>
+  <tr><td><code>CONTRIBUTING.md</code></td>
+      <td>架构速览、怎么跑测试、<b>怎么加新站点</b>、常见坑</td></tr>
+</table>
+
+<h3>13.2 仓库是唯一真相源</h3>
+<div class="note">
+  之前运行目录和仓库是<b>两份代码</b>，靠人工同步 —— 迟早会漏。<br>
+  现在：<code>$HERMES_HOME/plugins/job-radar</code> ← junction →
+  <code>&lt;repo&gt;/src/job_radar</code>，改代码即生效。<br>
+  <b>建 junction 要先停网关</b>（网关 import 插件时锁着目录，删不掉）。
+  用 <code>scripts/dev.sh link</code> / <code>unlink</code> 切换，会自动备份。
+</div>
+
+<div class="warn">
+  <b>私有数据必须移出插件目录。</b>
+  <code>profile.yaml</code> 已迁到 <code>&lt;plugin-data&gt;/job-radar/profile.yaml</code> ——
+  插件目录是指向 git 仓库的链接，画像放那儿会被提交上去。<br>
+  <b>日志目录也不能跟随 <code>plugin_data_dir()</code></b> ——
+  插件体检会把插件复制到临时目录再清理，日志文件在那儿会句柄未关。
+</div>
+
+<h3>13.3 一条命令做完检查</h3>
+<table>
+  <tr><th style="width:26%">命令</th><th>做什么</th></tr>
+  <tr><td><code>dev.sh test</code></td>
+      <td>跑单元测试（64 个，不需要装任何依赖）</td></tr>
+  <tr><td><code>dev.sh check</code></td>
+      <td>提交前全检：测试 + 脱敏扫描 + 仓库卫生</td></tr>
+  <tr><td><code>dev.sh sync-desktop</code></td>
+      <td>把 <code>desktop/plugin.js</code> 同步到桌面端副本</td></tr>
+  <tr><td><code>dev.sh link</code> / <code>unlink</code></td>
+      <td>切换 junction 开发模式 / 还原</td></tr>
+  <tr><td><code>dev.sh logs [N|-f]</code></td>
+      <td>看运行日志</td></tr>
+</table>
+
+<h3>13.4 脱敏扫描（发布前必过）</h3>
+<div class="warn">
+  <b>仓库里不得出现</b>：真实姓名、手机号、邮箱、本机绝对路径、真实公司名、
+  cookie 值、真实简历原文。<br>
+  <code>check-sensitive.sh</code> 扫 8 类规则。有些文件<b>必须</b>包含敏感形状
+  （比如测试要验证打码逻辑本身），在 <code>ALLOW_FILES</code> 里登记豁免 ——
+  但那些文件里的值必须是假的。
+</div>
+
+<h3>13.5 CI 不需要装 Hermes</h3>
+<div class="note">
+  核心模块（<code>matcher</code> / <code>push</code> / <code>login_check</code> /
+  <code>logging_setup</code> / <code>storage</code> / <code>report</code>）
+  <b>全是纯 stdlib</b>，只有 <code>plugins.plugin_storage</code> 和
+  dashboard 层的 fastapi 是外部依赖，且都有 fallback。<br>
+  → CI 上 64 个测试直接能跑，不用装 Hermes。
 </div>
 
 </body>

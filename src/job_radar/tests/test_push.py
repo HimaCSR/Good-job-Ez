@@ -42,11 +42,22 @@ class TestFormatJob(unittest.TestCase):
             self.assertLessEqual(len(m), LIMIT, m)
 
     def test_contains_key_fields(self):
+        """格式（2026-10-26 用户定）：岗位名 · 城市 + 链接。
+
+        **不带分数、不带命中理由** —— 完整明细在日报 Markdown 里。
+        """
         out = " ".join(format_job(self.JOB))
         self.assertIn("高级 web 前端工程师", out)
-        self.assertIn("88", out)
         self.assertIn("杭州", out)
         self.assertIn("zhaopin.com", out)
+
+    def test_no_score_no_reason(self):
+        """推送里不出现分数和命中理由。"""
+        out = " ".join(format_job(self.JOB))
+        self.assertNotIn("88", out)
+        self.assertNotIn("匹配度", out)
+        self.assertNotIn("职位名命中", out)
+        self.assertNotIn("技能覆盖", out)
 
     def test_very_long_title_is_truncated(self):
         job = dict(self.JOB, title="超长" * 60)

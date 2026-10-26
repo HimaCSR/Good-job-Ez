@@ -167,6 +167,26 @@ hermes plugins doctor ~/.hermes/plugins/job-radar --ci
 
 ---
 
+## 定时运行
+
+插件配了一个 cron 任务，每 6 小时抓一次并推送高匹配岗位。
+
+**它不经过 LLM** —— 跑的是 `~/.hermes/scripts/job_radar_cron.py`，
+脚本 stdout 直接投递到 QQ。好处：不烧 token、行为确定、
+不会因为模型胡说而推错内容。空输出 = 静默（没有新岗位就不打扰你）。
+
+```bash
+# 手动跑一次看看输出
+python ~/.hermes/scripts/job_radar_cron.py
+
+# 改完脚本后手动触发一次
+hermes cron run <job_id>
+```
+
+脚本在 [`examples/job_radar_cron.py`](examples/job_radar_cron.py)。
+
+---
+
 ## 开发
 
 ```bash

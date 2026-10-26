@@ -247,23 +247,36 @@ def mark(args, **kwargs):
 
 
 def push(args, **kwargs):
-    """生成待推送的消息序列（≤50 字/条，URL 除外）。"""
+    """生成待推送的消息序列（≤50 字/条，URL 除外）。
+
+    only_new=true（默认）→ 只给**还没推过**的岗位生成消息，
+    并在生成后标记为已推送 —— 这样同一个岗位不会重复推。
+    `pushed_at` 存在 jobs 表里，跟用户自己标记的 status 分开。
+    """
     try:
         from . import push as push_mod
         cfg = load_config()
         min_score = int(args.get("min_score", cfg["min_score"]))
         max_jobs = int(args.get("max_jobs", 3))
-        only_new = bool(args.get("only_new", False))
+        only_new = bool(args.get("only_new", True))
+        days = int(args.get("days", 1))
         if only_new:
-            jobs = storage.jobs_since(days=1, min_score=min_score)
+            jobs = storage.unpushed_jobs(days=days, min_score=min_score, limit=50)
         else:
             jobs = storage.all_jobs(limit=50, min_score=min_score)
         msgs = push_mod.build_push(jobs, min_score=min_score, max_jobs=max_jobs)
-        log.info("推送内容生成 jobs=%d msgs=%d only_new=%s",
-                 len(jobs), len(msgs), only_new)
+        # 标记已推送 —— 放在生成之后，投递由 cron 负责
+        pushed = []
+        if only_new:
+            picked = [j for j in jobs if (j.get("score") or 0) >= min_score][:max_jobs]
+            pushed = [j.get("job_id") for j in picked if j.get("job_id")]
+            storage.mark_pushed(pushed)
+        log.info("推送内容生成 jobs=%d msgs=%d only_new=%s 已标记=%d",
+                 len(jobs), len(msgs), only_new, len(pushed))
         return json.dumps({
             "count": len(msgs),
             "messages": msgs,
+            "job_ids": pushed,
             "note": "按顺序逐条发送；每条已≤50字（URL 除外）",
         }, ensure_ascii=False)
     except Exception as e:
