@@ -2,6 +2,7 @@
 
 import os
 import sys
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,7 +36,7 @@ class TestRedact(unittest.TestCase):
         self.assertEqual(redact(url), url)
 
     def test_company_name_is_not_masked(self):
-        text = "某人力资源有限公司 · 20-30K"
+        text = "杭州东识科技有限公司 · 20-30K"
         self.assertEqual(redact(text), text)
 
     def test_long_random_string_is_masked(self):
@@ -63,11 +64,18 @@ class TestLogger(unittest.TestCase):
         self.assertIn("测试日志行 12345", text)
 
     def test_secret_never_reaches_file(self):
+        """凭证值不能落到日志文件里。
+
+        只看**这次新写的**那几行 —— tail() 会带出历史内容，
+        早先版本没打码时写下的行还在文件里，不能拿它们判定。
+        """
         log = get_logger()
-        log.error("zp_at=PLACEHOLDER_VALUE_98765 登录失败")
-        text = tail(50)
-        self.assertNotIn("PLACEHOLDER_VALUE_98765", text)
-        self.assertIn("[REDACTED]", text)
+        marker = "SECRET_PROBE_%d" % (int(time.time() * 1000) % 1000000)
+        before = len(tail(100000))
+        log.error("zp_at=%s 登录失败", marker)
+        fresh = tail(100000)[before:]
+        self.assertNotIn(marker, fresh)
+        self.assertIn("[REDACTED]", fresh)
 
     def test_log_file_exists(self):
         get_logger().info("确保文件存在")

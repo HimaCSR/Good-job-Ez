@@ -89,25 +89,37 @@ def redact(text):
 
 
 class _RedactingFormatter(logging.Formatter):
-    """所有消息过一遍 redact()，双保险。"""
+    """所有消息过一遍 redact()，双保险。
+
+    **不改 record 本身** —— 一个 record 会依次经过多个 handler，
+    原地改 record.msg 会让第二个 handler 拿到已经被改过的内容，
+    出现「文件里打码了、stderr 里没打码」这种不一致。
+    这里复制一份 record 再改。
+    """
 
     def format(self, record):
         try:
-            record.msg = redact(record.getMessage())
-            record.args = ()
+            clone = logging.makeLogRecord(record.__dict__)
+            clone.msg = redact(record.getMessage())
+            clone.args = ()
+            return super().format(clone)
         except Exception:
-            pass
-        return super().format(record)
+            return super().format(record)
 
 
 def _plugin_data_dir() -> str:
-    """插件数据目录（与 storage.py 同一处）。"""
-    try:
-        from plugins.plugin_storage import plugin_data_dir
-        return plugin_data_dir("job-radar")
-    except ImportError:
-        base = os.environ.get("LOCALAPPDATA", "")
-        return os.path.join(base, "hermes", "plugin-data", "job-radar")
+    """日志目录。
+
+    **刻意不跟 `plugin_data_dir()` 走** —— 插件体检（hermes plugins doctor）
+    会把插件复制到临时目录并把 plugin_data_dir 指向那里，加载完再清理。
+    日志文件在那儿被创建的话，句柄没关，清理就失败（WinError 32）。
+
+    日志是**本机诊断产物**，不属于「插件的测试数据」，固定放自己的目录。
+    """
+    base = os.environ.get("LOCALAPPDATA", "")
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".local", "share")
+    return os.path.join(base, "hermes", "plugin-data", "job-radar")
 
 
 def log_dir() -> str:
@@ -122,6 +134,56 @@ def log_file() -> str:
 
 
 _logger = None
+
+
+class _LazyRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """第一次 emit 才真正打开文件。
+
+    构造时不碰磁盘 —— 插件被复制到临时目录体检时不会留下打开的句柄。
+    """
+
+    def __init__(self, filename, *args, **kwargs):
+        # 绕过父类 __init__ 的 open()，先记下参数
+        self._lazy_filename = filename
+        self._lazy_args = args
+        self._lazy_kwargs = kwargs
+        self._lazy_ready = False
+        # 记下 formatter —— 父类 __init__ 会把它重置掉
+        self._lazy_formatter = kwargs.pop("formatter", None)
+        logging.Handler.__init__(self)
+
+    def _ensure_open(self):
+        if self._lazy_ready:
+            return
+        try:
+            logging.handlers.RotatingFileHandler.__init__(
+                self, self._lazy_filename, *self._lazy_args, **self._lazy_kwargs)
+            # 父类 __init__ 把 formatter 重置成默认的了 —— 装回来
+            if self._lazy_formatter is not None:
+                self.setFormatter(self._lazy_formatter)
+            self._lazy_ready = True
+        except Exception:
+            # 开不了就永久放弃，别每次 emit 都重试
+            self._lazy_ready = True
+            self._lazy_failed = True
+
+    def emit(self, record):
+        if not self._lazy_ready:
+            self._ensure_open()
+        if getattr(self, "_lazy_failed", False):
+            return
+        try:
+            logging.handlers.RotatingFileHandler.emit(self, record)
+        except Exception:
+            pass
+
+    def close(self):
+        if self._lazy_ready and not getattr(self, "_lazy_failed", False):
+            try:
+                logging.handlers.RotatingFileHandler.close(self)
+            except Exception:
+                pass
+        logging.Handler.close(self)
 
 
 def get_logger() -> logging.Logger:
@@ -147,12 +209,18 @@ def get_logger() -> logging.Logger:
     )
 
     # ① 自己的文件（轮转）
+    #
+    # **延迟打开**：RotatingFileHandler 在构造时就创建文件并占住句柄。
+    # 插件体检（hermes plugins doctor）会把插件目录复制到临时目录再加载，
+    # 那里创建的文件句柄会让复制/清理失败（WinError 32）。
+    # 改成第一次真正写日志时才打开，用一个自定义 handler 做延迟。
     try:
-        fh = logging.handlers.RotatingFileHandler(
+        fh = _LazyRotatingFileHandler(
             log_file(), maxBytes=_MAX_BYTES, backupCount=_BACKUP_COUNT,
             encoding="utf-8")
         fh.setLevel(logging.DEBUG)
         fh.setFormatter(fmt)
+        fh._lazy_formatter = fmt      # 懒加载真正打开时会重置，得记着
         logger.addHandler(fh)
     except Exception:
         pass    # 文件开不了也不能拖垮插件
