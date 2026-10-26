@@ -309,8 +309,9 @@ function ProfileView({ ctx, cfg, onSaved }) {
 
 // ── 岗位推荐 ────────────────────────────────────────────────────────────────
 
-function JobCard({ job }) {
+function JobCard({ job, ctx }) {
   const [open, setOpen] = React.useState(false)
+  const [optOpen, setOptOpen] = React.useState(false)
   const score = job.score ?? 0
   const tone = score >= 70 ? 'success' : score >= 50 ? 'warn' : 'muted'
   return jsxs('div', {
@@ -354,8 +355,195 @@ function JobCard({ job }) {
               children: '缺口：' + job.missing.join('、'),
             })
           : null,
+        jsxs('div', { className: 'mt-2 flex flex-wrap gap-2', children: [
+          jsx('button', {
+            type: 'button',
+            className: cn(
+              'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1',
+              'text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'
+            ),
+            onClick: (e) => { e.stopPropagation(); setOptOpen(true) },
+            children: '简历匹配优化',
+          }),
+          job.url ? jsx('a', {
+            href: job.url,
+            target: '_blank',
+            rel: 'noreferrer',
+            className: cn(
+              'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1',
+              'text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'
+            ),
+            children: '打开岗位',
+          }) : null,
+        ]}),
       ]}),
+      optOpen && jsx(ResumeOptimizeDialog, {
+        job,
+        ctx,
+        onClose: () => setOptOpen(false),
+      }),
     ],
+  })
+}
+
+/* 简历匹配优化弹窗。
+ *
+ * **只生成，不投递** —— 投递要用户明确点确认，那是另一道闸门。
+ * 结果里有「← 依据：经历第 N 条」的标注，可以核对每条都是真经历。
+ */
+function ResumeOptimizeDialog({ job, ctx, onClose }) {
+  const [tpl, setTpl] = React.useState('classic')
+  const [state, setState] = React.useState({ phase: 'idle' })
+  const [showBasis, setShowBasis] = React.useState(true)
+
+  const run = React.useCallback(async () => {
+    setState({ phase: 'loading' })
+    try {
+      const r = await ctx.rest('/resume/optimize', {
+        method: 'POST',
+        body: { job_id: job.job_id, template_id: tpl, save: false },
+      })
+      if (r && r.ok === false) {
+        setState({ phase: 'error', error: r.error, hint: r.hint })
+        return
+      }
+      setState({ phase: 'done', data: r })
+    } catch (e) {
+      setState({ phase: 'error', error: String((e && e.message) || e) })
+    }
+  }, [job.job_id, tpl, ctx])
+
+  const save = React.useCallback(async () => {
+    setState((s) => ({ ...s, phase: 'saving' }))
+    try {
+      const r = await ctx.rest('/resume/optimize', {
+        method: 'POST',
+        body: { job_id: job.job_id, template_id: tpl, save: true },
+      })
+      if (r && r.ok === false) {
+        setState((s) => ({ ...s, phase: 'error', error: r.error, hint: r.hint }))
+        return
+      }
+      setState((s) => ({ ...s, phase: 'done', data: r, saved: r.saved }))
+    } catch (e) {
+      setState((s) => ({ ...s, phase: 'error', error: String((e && e.message) || e) }))
+    }
+  }, [job.job_id, tpl, ctx])
+
+  const d = state.data
+  const html = showBasis ? (d && d.html_preview) : (d && d.html)
+
+  return jsx('div', {
+    className: cn(
+      'fixed inset-0 z-50 flex items-center justify-center',
+      'bg-black/40 p-6'
+    ),
+    onClick: onClose,
+    children: jsxs('div', {
+      className: cn(
+        'flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden',
+        'rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-primary)'
+      ),
+      onClick: (e) => e.stopPropagation(),
+      children: [
+        jsxs('div', {
+          className: 'flex items-center justify-between border-b border-(--ui-stroke-secondary) px-4 py-3',
+          children: [
+            jsxs('div', { children: [
+              jsx('div', { className: 'text-sm font-medium', children: '简历匹配优化' }),
+              jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: job.title || '' }),
+            ]}),
+            jsx('button', {
+              type: 'button',
+              onClick: onClose,
+              className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+              children: '关闭',
+            }),
+          ],
+        }),
+        jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
+          jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
+            jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: '模板' }),
+            ...['classic', 'modern', 'tech', 'acad'].map((id) => jsx('button', {
+              key: id,
+              type: 'button',
+              onClick: () => setTpl(id),
+              className: cn(
+                'rounded-md border px-2.5 py-1 text-[0.6875rem]',
+                tpl === id
+                  ? 'border-(--ui-accent) text-(--ui-text-primary)'
+                  : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary)'
+              ),
+              children: ({ classic: '经典单栏', modern: '现代双栏', tech: '技术极客', acad: '学术风' })[id],
+            })),
+            state.phase === 'idle' || state.phase === 'error'
+              ? jsx('button', {
+                  type: 'button',
+                  onClick: run,
+                  className: cn(
+                    'rounded-md border border-(--ui-accent) px-2.5 py-1',
+                    'text-[0.6875rem] text-(--ui-text-primary)'
+                  ),
+                  children: '开始优化',
+                })
+              : null,
+          ]}),
+
+          state.phase === 'loading' || state.phase === 'saving'
+            ? jsx('div', { className: 'py-8 text-center text-xs text-(--ui-text-tertiary)', children: '正在分析 JD 与你的经历…' })
+            : null,
+
+          state.phase === 'error'
+            ? jsxs('div', {
+                className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-xs',
+                children: [
+                  jsx('div', { className: 'text-(--ui-text-primary)', children: state.error }),
+                  state.hint ? jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)', children: state.hint }) : null,
+                ],
+              })
+            : null,
+
+          d ? jsxs('div', { className: 'flex flex-col gap-3', children: [
+            jsxs('div', { className: 'flex flex-wrap gap-3 text-[0.6875rem]', children: [
+              jsx('span', { className: 'text-(--ui-text-secondary)',
+                children: '命中 ' + ((d.matched && d.matched.covered) || []).length + ' 条经历' }),
+              (d.matched && d.matched.gaps && d.matched.gaps.length)
+                ? jsx('span', { className: 'text-(--ui-text-quaternary)',
+                    children: '缺口：' + d.matched.gaps.map((g) => g.name).join('、') })
+                : null,
+              jsx('span', { className: 'text-(--ui-text-tertiary)',
+                children: '依据来自你的真实经历，不会编造' }),
+            ]}),
+            jsxs('div', { className: 'flex items-center gap-2', children: [
+              jsx('label', { className: 'flex items-center gap-1.5 text-[0.6875rem] text-(--ui-text-secondary)', children: [
+                jsx('input', {
+                  type: 'checkbox',
+                  checked: showBasis,
+                  onChange: (e) => setShowBasis(e.target.checked),
+                }),
+                '显示依据标注',
+              ]}),
+              jsx('button', {
+                type: 'button',
+                onClick: save,
+                className: cn(
+                  'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1',
+                  'text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'
+                ),
+                children: state.saved ? '已存进简历档案' : '存进简历档案',
+              }),
+            ]}),
+            jsx('div', {
+              className: cn(
+                'overflow-auto rounded-md border border-(--ui-stroke-secondary)',
+                'bg-white p-6'
+              ),
+              dangerouslySetInnerHTML: { __html: html || '' },
+            }),
+          ]}) : null,
+        ]}),
+      ],
+    }),
   })
 }
 
@@ -378,7 +566,7 @@ function RecommendView({ ctx, cfg }) {
             ? jsx(ErrorState, { message: String(jobsQ.error) })
             : jobs.length === 0
               ? jsx(EmptyState, { title: '还没有岗位', description: '跑一次抓取就会出现' })
-              : jsxs('div', {}, jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j }))),
+              : jsxs('div', {}, jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx }))),
       }),
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
@@ -706,7 +894,7 @@ function ResumeView({ ctx }) {
   })
   const resQ = useQuery({
     queryKey: ['job-radar', 'resumes'],
-    queryFn: async () => ctx.rest('/resumes'),
+    queryFn: async () => ctx.rest('/resume/list'),
   })
   const qc = useQueryClient()
   const [picked, setPicked] = React.useState(['classic', 'modern'])

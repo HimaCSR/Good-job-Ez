@@ -119,3 +119,27 @@ def daemon_status():
     except Exception as e:
         log.warning("daemon status 失败: %s", e)
         return "daemon status 失败: %s" % e
+
+
+def fetch_detail(site, job_id, timeout=90):
+    """抓一个岗位的详情页（拿到完整 JD）。
+
+    列表页不返回 JD —— 描述、要求都在详情页里。
+    简历匹配优化需要 JD，所以按需抓一次。
+
+    返回统一词表的一份岗位；失败返回 {"error": ...}。
+    """
+    if site == "zhaopin":
+        data = run_site("zhaopin/detail", job_id, timeout=timeout)
+    elif site == "boss":
+        data = run_site("boss/detail", job_id, timeout=timeout)
+    else:
+        return {"error": "未知站点: %s" % site}
+    if "error" in data:
+        return data
+    # detail adapter 返回的就是一份岗位
+    if data.get("description") or data.get("title"):
+        log.info("抓到详情 site=%s job=%s JD=%d字",
+                 site, job_id, len(data.get("description") or ""))
+        return data
+    return {"error": "详情页没返回内容"}

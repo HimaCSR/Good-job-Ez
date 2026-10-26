@@ -135,3 +135,64 @@ LOGIN = {
         },
     },
 }
+
+
+RESUME_OPTIMIZE = {
+    "name": "job_radar_resume_optimize",
+    "description": (
+        "针对某个岗位做简历匹配优化：读该岗 JD → 挑出核心要求 → "
+        "对照用户真实经历 → 按模板生成一份定向简历。"
+        "每条 bullet 都带「← 依据：经历第 N 条」的来源标注，**不编造经历**。"
+        "结果先给预览（draft），用户确认后才存成正式简历。"
+        "这是只读/生成操作，不会投递任何简历。"
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "job_id": {
+                "type": "string",
+                "description": "岗位 ID（从 job_radar_list 拿）",
+            },
+            "template_id": {
+                "type": "string",
+                "description": (
+                    "可选，模板：classic / modern / tech / acad，"
+                    "默认 classic。也可以用用户上传转换出来的模板 id。"
+                ),
+            },
+            "save": {
+                "type": "boolean",
+                "description": (
+                    "可选，是否存进简历档案（生成 PDF + 打标签）。"
+                    "默认 false —— 先预览，用户认可再存。"
+                ),
+            },
+        },
+        "required": ["job_id"],
+    },
+}
+
+
+RESUME_LIST = {
+    "name": "job_radar_resume_list",
+    "description": (
+        "列出用户简历档案：投递/优化成功的简历，带标签。"
+        "标签是后续岗位简历评分推荐的依据。"
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "可选，最多返回几条，默认 20",
+            },
+            "with_score_for": {
+                "type": "string",
+                "description": (
+                    "可选，给一个岗位 ID，顺便算出每份历史简历对该岗位的匹配分，"
+                    "按分排序 —— 投递时的「历史简历推荐」用的就是这个。"
+                ),
+            },
+        },
+    },
+}

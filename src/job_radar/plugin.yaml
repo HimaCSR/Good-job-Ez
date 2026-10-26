@@ -8,6 +8,8 @@ provides_tools:
   - job_radar_mark
   - job_radar_push
   - job_radar_login
+  - job_radar_resume_optimize
+  - job_radar_resume_list
 config_schema:
   keywords: {type: list, default: [], description: "搜索关键词列表"}
   city: {type: str, default: "653", description: "智联城市 jl 代码：653=杭州，538=上海，530=北京，489=全国"}

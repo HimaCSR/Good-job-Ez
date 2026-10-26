@@ -43,7 +43,7 @@ _PKG_NAME = "job_radar"
 _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
-    "logging_setup",
+    "logging_setup", "resume_template", "resume_builder", "resume_store",
 )
 
 
@@ -507,32 +507,6 @@ def report(date: Optional[str] = None) -> Dict[str, Any]:
 
 # ── 简历模板与用户简历 ────────────────────────────────────────────────────────
 
-BUILTIN_TEMPLATES = [
-    {"template_id": "classic", "name": "经典单栏", "format": "builtin", "builtin": True,
-     "description": "通用性最强，HR 都看得惯"},
-    {"template_id": "modern", "name": "现代双栏", "format": "builtin", "builtin": True,
-     "description": "技能多的岗位适合，视觉清爽"},
-    {"template_id": "tech", "name": "技术极客", "format": "builtin", "builtin": True,
-     "description": "极客风，适合技术岗投递"},
-]
-
-
-def _seed_templates() -> None:
-    """内置模板只在库为空时种一次，不覆盖用户自己上传的。"""
-    storage = _sibling("storage")
-    try:
-        existing = storage.list_templates()
-    except Exception:
-        return
-    if existing:
-        return
-    for tpl in BUILTIN_TEMPLATES:
-        try:
-            storage.upsert_template(tpl)
-        except Exception:
-            pass
-
-
 @router.get("/resumes")
 def list_resumes() -> Dict[str, Any]:
     """用户简历档案列表 —— 投递成功的简历会自动出现在这里。"""
@@ -541,17 +515,6 @@ def list_resumes() -> Dict[str, Any]:
         return {"resumes": storage.list_resumes()}
     except Exception as exc:
         return {"resumes": [], "error": str(exc)}
-
-
-@router.get("/templates")
-def list_templates() -> Dict[str, Any]:
-    """简历模板库 —— 内置 3 套 + 用户上传的。"""
-    storage = _sibling("storage")
-    _seed_templates()
-    try:
-        return {"templates": storage.list_templates()}
-    except Exception as exc:
-        return {"templates": list(BUILTIN_TEMPLATES), "error": str(exc)}
 
 
 @router.post("/templates")
@@ -607,3 +570,100 @@ def purge_logs(keep_days: int = 30) -> Dict[str, Any]:
         return {"ok": True, "removed": removed}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ── 简历匹配优化与档案 ────────────────────────────────────────────────────────
+
+@router.get("/resume/requirements")
+def resume_requirements(job_id: str) -> Dict[str, Any]:
+    """某岗位的 JD 核心要求（不生成简历，只做分析）。"""
+    storage = _sibling("storage")
+    resume_builder = _sibling("resume_builder")
+    job = storage.get_job(job_id)
+    if not job:
+        return {"error": "找不到岗位 %s" % job_id}
+    prof = _read_profile()
+    reqs = resume_builder.extract_requirements(
+        job.get("description") or "", prof.get("skills") or [])
+    return {
+        "job_id": job_id,
+        "title": job.get("title"),
+        "has_jd": bool((job.get("description") or "").strip()),
+        "skills": reqs["skills"],
+        "degree": reqs["degree"],
+        "min_years": reqs["min_years"],
+        "keywords": reqs["keywords"],
+    }
+
+
+@router.post("/resume/optimize")
+def resume_optimize(body: Dict[str, Any]) -> Dict[str, Any]:
+    """针对某岗位生成定向简历。
+
+    body: {job_id, template_id?, save?}
+    返回 html（正式版）+ html_preview（带依据标注）+ 分析结果。
+    """
+    storage = _sibling("storage")
+    resume_builder = _sibling("resume_builder")
+    resume_store = _sibling("resume_store")
+    resume_template = _sibling("resume_template")
+    job_id = (body.get("job_id") or "").strip()
+    template_id = body.get("template_id") or "classic"
+    want_save = bool(body.get("save", False))
+    if not job_id:
+        return {"ok": False, "error": "需要 job_id"}
+
+    job = storage.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "找不到岗位 %s" % job_id}
+
+    prof = _read_profile()
+    if not (prof.get("experience_text") or "").strip():
+        return {"ok": False, "error": "还没有填真实经历",
+                "hint": "设置页 → 用户简历 → 填「真实经历」。没有它无法生成简历，也不该编造。"}
+
+    out = resume_builder.optimize_resume(job, prof, template_id)
+    sections = resume_builder.build_sections(out["resume"])
+    ctx = {"title": "简历", "identity": out["resume"]["identity"], "sections": sections}
+    html_final = resume_template.render_html(template_id, dict(ctx, show_basis=False))
+    html_preview = resume_template.render_html(template_id, dict(ctx, show_basis=True))
+
+    saved = None
+    if want_save:
+        saved = resume_store.save_resume(job, out["matched"], html_final,
+                                         template_id=template_id)
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "job_title": job.get("title"),
+        "template_id": template_id,
+        "requirements": out["requirements"],
+        "matched": out["matched"],
+        "resume": out["resume"],
+        "html": html_final,
+        "html_preview": html_preview,
+        "saved": saved,
+    }
+
+
+@router.get("/resume/list")
+def resume_list(job_id: str = "") -> Dict[str, Any]:
+    """简历档案列表；给了 job_id 就顺便算每份对该岗的匹配分并排序。"""
+    storage = _sibling("storage")
+    resume_store = _sibling("resume_store")
+    items = resume_store.list_resumes(limit=50)
+    if job_id:
+        job = storage.get_job(job_id)
+        if not job:
+            return {"resumes": [], "error": "找不到岗位 %s" % job_id}
+        for it in items:
+            it["match_score"] = resume_store.resume_matches(job, it)
+        items.sort(key=lambda x: -x.get("match_score", 0))
+    return {"resumes": items}
+
+
+@router.get("/templates")
+def list_templates() -> Dict[str, Any]:
+    """简历模板库 —— 内置 4 套 + 用户上传转换的。"""
+    resume_template = _sibling("resume_template")
+    return {"templates": resume_template.list_all()}

@@ -308,3 +308,115 @@ def login_status(args, **kwargs):
     except Exception as e:
         log.exception("登录态体检失败")
         return json.dumps({"error": "登录态体检失败: %s" % e}, ensure_ascii=False)
+
+
+def resume_optimize(args, **kwargs):
+    """针对某个岗位做简历匹配优化（四步流程）。
+
+    **不投递** —— 只生成草稿。save=True 才存进档案。
+    """
+    try:
+        from . import resume_builder, resume_store, resume_template
+        job_id = args.get("job_id", "")
+        template_id = args.get("template_id") or "classic"
+        want_save = bool(args.get("save", False))
+        if not job_id:
+            return json.dumps({"error": "需要 job_id"}, ensure_ascii=False)
+
+        job = storage.get_job(job_id)
+        if not job:
+            return json.dumps({"error": "找不到岗位 %s" % job_id}, ensure_ascii=False)
+        # JD 只在详情页 —— 没有就按需抓一次
+        if not (job.get("description") or "").strip():
+            site = job.get("source") or "zhaopin"
+            log.info("岗位 %s 没有 JD，按需抓详情页", job_id)
+            detail = bbclient.fetch_detail(site, job_id)
+            if "error" in detail:
+                return json.dumps({
+                    "error": "抓不到该岗位的 JD",
+                    "detail": str(detail["error"])[:150],
+                    "hint": "详情页抓取失败，换个岗位或稍后重试",
+                }, ensure_ascii=False)
+            job = dict(job)
+            job.update({k: v for k, v in detail.items() if v})
+            storage.upsert(job, {"score": job.get("score", 0),
+                                  "reasons": job.get("reasons") or [],
+                                  "missing": job.get("missing") or []})
+
+        prof = load_profile()
+        if not (prof.get("experience_text") or "").strip():
+            return json.dumps({
+                "error": "还没有填真实经历",
+                "hint": "设置页 → 用户简历 → 填「真实经历」，"
+                        "没有它就无法生成简历（也不该编造）",
+            }, ensure_ascii=False)
+
+        out = resume_builder.optimize_resume(job, prof, template_id)
+        sections = resume_builder.build_sections(out["resume"])
+        ctx = {"title": "%s - 简历" % (prof.get("identity") or {}).get("name", ""),
+               "identity": out["resume"]["identity"],
+               "sections": sections}
+        html_preview = resume_template.render_html(
+            template_id, dict(ctx, show_basis=True))
+        html_final = resume_template.render_html(
+            template_id, dict(ctx, show_basis=False))
+
+        saved = None
+        if want_save:
+            saved = resume_store.save_resume(
+                job, out["matched"], html_final, template_id=template_id)
+            log.info("简历已存档 id=%s pdf=%s", saved["resume_id"], saved["pdf"])
+
+        log.info("简历优化完成 job=%s 命中=%d 缺口=%d 模板=%s 保存=%s",
+                 job_id, len(out["matched"]["covered"]),
+                 len(out["matched"]["gaps"]), template_id, bool(saved))
+
+        return json.dumps({
+            "job_id": job_id,
+            "job_title": job.get("title"),
+            "template_id": template_id,
+            "requirements": {
+                "skills": [{"name": s["name"], "hits": s["hits"],
+                            "you_have": s["user_has"]}
+                           for s in out["requirements"]["skills"][:12]],
+                "degree": out["requirements"]["degree"],
+                "min_years": out["requirements"]["min_years"],
+                "keywords": out["requirements"]["keywords"][:10],
+            },
+            "matched_bullets": [
+                {"text": c["text"], "basis": c["basis"], "skills": c["matched"]}
+                for c in out["matched"]["covered"]],
+            "gaps": out["matched"]["gaps"],
+            "strengths": out["matched"]["strengths"],
+            "html_preview": html_preview,
+            "html": html_final,
+            "saved": saved,
+        }, ensure_ascii=False)
+    except Exception as e:
+        log.exception("简历优化失败")
+        return json.dumps({"error": "简历优化失败: %s" % e}, ensure_ascii=False)
+
+
+def resume_list(args, **kwargs):
+    """简历档案列表（可带某岗位的匹配分排序）。"""
+    try:
+        from . import resume_store
+        limit = int(args.get("limit", 20))
+        job_id = args.get("with_score_for") or ""
+        items = resume_store.list_resumes(limit=limit)
+
+        if job_id:
+            job = storage.get_job(job_id)
+            if not job:
+                return json.dumps({"error": "找不到岗位 %s" % job_id},
+                                  ensure_ascii=False)
+            for it in items:
+                it["match_score"] = resume_store.resume_matches(job, it)
+            items.sort(key=lambda x: -x.get("match_score", 0))
+            return json.dumps({"job_id": job_id, "resumes": items},
+                              ensure_ascii=False)
+
+        return json.dumps({"resumes": items}, ensure_ascii=False)
+    except Exception as e:
+        log.exception("读取简历档案失败")
+        return json.dumps({"error": "读取简历档案失败: %s" % e}, ensure_ascii=False)
