@@ -177,6 +177,15 @@ class _LazyRotatingFileHandler(logging.handlers.RotatingFileHandler):
         except Exception:
             pass
 
+    @property
+    def stream(self):
+        """logging.shutdown 会摸 handler.stream —— 懒加载时可能还没打开。"""
+        return getattr(self, "stream_", None)
+
+    @stream.setter
+    def stream(self, value):
+        self.stream_ = value
+
     def close(self):
         if self._lazy_ready and not getattr(self, "_lazy_failed", False):
             try:

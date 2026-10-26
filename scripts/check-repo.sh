@@ -70,7 +70,11 @@ reports/|reports/
 日志|*.log
 EOF
 
-# ④ 桌面端 plugin.js 和仓库版一致？
+# ④ 运行副本和仓库版一致？
+#
+# 只查 desktop/plugin.js 是不够的 —— 之前就漏过 logging_setup.py，
+# 仓库里少了 shutdown 时要用的 stream 属性补丁，退出时才炸。
+# 这里逐个文件比。
 echo
 echo "副本一致性检查…"
 if [ -n "${LOCALAPPDATA:-}" ]; then
@@ -78,12 +82,22 @@ if [ -n "${LOCALAPPDATA:-}" ]; then
 else
     RUNTIME="$HOME/.hermes/plugins/job-radar"
 fi
-if [ -f "$RUNTIME/desktop/plugin.js" ]; then
-    if cmp -s "$RUNTIME/desktop/plugin.js" "src/job_radar/desktop/plugin.js"; then
-        ok "运行副本与仓库一致"
-    else
-        warn "运行副本与仓库不一致 —— 跑 scripts/dev.sh sync-desktop"
-    fi
+if [ -d "$RUNTIME" ]; then
+    DRIFT=0
+    CHECKED=0
+    while IFS= read -r rel; do
+        [ -z "$rel" ] && continue
+        CHECKED=$((CHECKED + 1))
+        if ! cmp -s "$RUNTIME/$rel" "src/job_radar/$rel"; then
+            bad "运行副本与仓库不一致: $rel"
+            printf '      → 跑 scripts/dev.sh sync\n'
+            DRIFT=1
+        fi
+    done < <(cd "$RUNTIME" && find . -type f \( -name '*.py' -o -name '*.js' -o \
+                -name '*.yaml' -o -name '*.json' \) \
+                -not -path './__pycache__/*' -not -path './tests/__pycache__/*' \
+                | sed 's|^\./||' | sort)
+    [ "$DRIFT" -eq 0 ] && ok "运行副本与仓库一致（$CHECKED 个文件）"
 else
     warn "找不到运行副本（$RUNTIME）"
 fi

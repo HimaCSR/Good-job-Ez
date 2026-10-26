@@ -7,7 +7,11 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from logging_setup import redact, get_logger, log_file, tail, purge  # noqa: E402
+import logging  # noqa: E402
+import tempfile  # noqa: E402
+from logging_setup import (  # noqa: E402
+    redact, get_logger, log_file, tail, purge, _LazyRotatingFileHandler,
+)
 
 
 class TestRedact(unittest.TestCase):
@@ -80,6 +84,37 @@ class TestLogger(unittest.TestCase):
     def test_log_file_exists(self):
         get_logger().info("确保文件存在")
         self.assertTrue(os.path.exists(log_file()))
+
+
+class TestLazyHandlerStream(unittest.TestCase):
+    """logging.shutdown 会摸 handler.stream ——
+    懒加载时文件可能还没打开，属性缺失会抛 AttributeError。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="jr-lazy-")
+
+    def test_stream_property_exists_before_open(self):
+        h = _LazyRotatingFileHandler(
+            os.path.join(self.tmp, "never-written.log"), maxBytes=1024, backupCount=1)
+        # 还没 emit 过，文件没打开
+        self.assertIsNone(h.stream)
+
+    def test_stream_setter_accepted(self):
+        h = _LazyRotatingFileHandler(
+            os.path.join(self.tmp, "never-written2.log"), maxBytes=1024, backupCount=1)
+        h.stream = None          # 不该抛
+        self.assertIsNone(h.stream)
+
+    def test_shutdown_does_not_raise(self):
+        """真实触发一次 shutdown —— 这是原来会炸的地方。"""
+        h = _LazyRotatingFileHandler(
+            os.path.join(self.tmp, "never-written3.log"), maxBytes=1024, backupCount=1)
+        logging.addLevelName(logging.INFO, "INFO")
+        logger = logging.getLogger("test_lazy_shutdown_%d" % id(h))
+        logger.handlers = [h]
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logging.shutdown()      # 不该抛
 
 
 if __name__ == "__main__":
