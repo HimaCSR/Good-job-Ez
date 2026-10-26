@@ -1,5 +1,14 @@
 """bb-browser CLI 封装。所有外部进程调用集中在这里，便于限速与排查。"""
 
+import time
+
+try:
+    from .logging_setup import get_logger
+except ImportError:          # 脱离包单独导入时（单测）
+    from logging_setup import get_logger
+
+log = get_logger()
+
 import json
 import os
 import random
@@ -44,23 +53,36 @@ def _cmd(*parts):
 
 
 def run_site(site, *args, timeout=120):
-    """跑一个 adapter，返回解析后的 JSON。失败返回 {"error": ...}。"""
+    """跑一个 adapter，返回解析后的 JSON。失败返回 {"error": ...}。
+
+    每次调用都记一条日志：站点、参数、耗时、返回大小、错误类型。
+    凭证和 cookie 不进日志（logging_setup 会再打码一层）。
+    """
     cmd = _cmd("site", site, *args, "--json")
+    started = time.time()
     try:
         p = subprocess.run(cmd, capture_output=True, text=True,
                            timeout=timeout, encoding="utf-8", errors="replace")
     except subprocess.TimeoutExpired:
+        log.warning("adapter 超时 site=%s args=%s timeout=%ss", site, list(args), timeout)
         return {"error": "bb-browser 超时(%ss)" % timeout}
     except FileNotFoundError:
+        log.error("找不到 bash 或 bb.sh: %s", BB_SH)
         return {"error": "找不到 bash 或 bb.sh: %s" % BB_SH}
     except OSError as e:
+        log.error("启动 bb-browser 失败: %s", e)
         return {"error": "启动 bb-browser 失败: %s" % e}
     out = (p.stdout or "").strip()
+    elapsed = time.time() - started
     if not out:
+        log.warning("adapter 无输出 site=%s elapsed=%.1fs stderr=%s",
+                    site, elapsed, (p.stderr or "")[:200])
         return {"error": "无输出", "stderr": (p.stderr or "")[:400]}
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
+        log.warning("adapter 输出不是 JSON site=%s elapsed=%.1fs raw=%s",
+                    site, elapsed, out[:200])
         return {"error": "输出不是 JSON", "raw": out[:300]}
     # bb-browser 把 adapter 结果包在 {"result": {...}} 里
     if isinstance(data, dict) and "result" in data:
@@ -68,15 +90,22 @@ def run_site(site, *args, timeout=120):
     if isinstance(data, dict) and "error" in data:
         err = data["error"]
         if isinstance(err, dict):
-            return {"error": err.get("message") or json.dumps(err, ensure_ascii=False),
-                    "hint": data.get("reportHint")}
-        return {"error": str(err)}
+            msg = err.get("message") or json.dumps(err, ensure_ascii=False)
+        else:
+            msg = str(err)
+        log.warning("adapter 返回错误 site=%s elapsed=%.1fs err=%s",
+                    site, elapsed, msg[:200])
+        return {"error": msg, "hint": data.get("reportHint")}
+    count = len(data.get("jobs") or []) if isinstance(data, dict) else 0
+    log.info("adapter 成功 site=%s elapsed=%.1fs jobs=%d bytes=%d",
+             site, elapsed, count, len(out))
     return data if isinstance(data, dict) else {"items": data}
 
 
 def polite_pause(base=BASE_GAP):
     """模拟人手：基准间隔 + 随机抖动。base 不可为 0。"""
     gap = max(1, base) + random.uniform(*GAP_JITTER)
+    log.debug("限速停顿 %.1fs", gap)
     time.sleep(gap)
     return gap
 
@@ -88,4 +117,5 @@ def daemon_status():
                            timeout=20, encoding="utf-8", errors="replace")
         return (p.stdout or "") + (p.stderr or "")
     except Exception as e:
+        log.warning("daemon status 失败: %s", e)
         return "daemon status 失败: %s" % e

@@ -43,6 +43,7 @@ _PKG_NAME = "job_radar"
 _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
+    "logging_setup",
 )
 
 
@@ -562,5 +563,34 @@ def remove_template(template_id: str) -> Dict[str, Any]:
     try:
         ok = storage.delete_template(template_id)
         return {"ok": ok}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/logs")
+def get_logs(lines: int = 200) -> Dict[str, Any]:
+    """最近的插件运行日志（设置页「查看日志」用）。
+
+    只返回已打码的内容 —— 凭证值不会出现在这里。
+    """
+    logging_setup = _sibling("logging_setup")
+    try:
+        text = logging_setup.tail(max(1, min(int(lines), 2000)))
+    except Exception as exc:
+        return {"text": "", "error": str(exc)}
+    return {
+        "text": text,
+        "file": logging_setup.log_file(),
+        "lines": text.count("\n") + (1 if text else 0),
+    }
+
+
+@router.post("/logs/purge")
+def purge_logs(keep_days: int = 30) -> Dict[str, Any]:
+    """删掉太老的轮转日志文件。"""
+    logging_setup = _sibling("logging_setup")
+    try:
+        removed = logging_setup.purge(max(1, int(keep_days)))
+        return {"ok": True, "removed": removed}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

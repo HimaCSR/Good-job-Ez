@@ -412,11 +412,24 @@ const SITE_META = {
   huibo: { label: '汇博招聘网', color: '#0A5CA8', creds: [] },
 }
 
+
+/** 插件运行日志。默认不拉 —— 用户点开才请求。 */
+function useLogs(ctx, enabled) {
+  return useQuery({
+    queryKey: ['job-radar', 'logs'],
+    queryFn: async () => ctx.rest('/logs?lines=300'),
+    enabled: !!enabled,
+    staleTime: 5000,
+  })
+}
+
 function PlatformView({ ctx, cfg }) {
   const loginQ = useLogin(ctx)
   const sites = (loginQ.data && loginQ.data.sites) || []
   const summary = (loginQ.data && loginQ.data.summary) || {}
   const settings = (cfg && cfg.settings) || {}
+  const [showLogs, setShowLogs] = React.useState(false)
+  const logsQ = useLogs(ctx, showLogs)
 
   return jsxs(Fragment, {
     children: [
@@ -452,6 +465,43 @@ function PlatformView({ ctx, cfg }) {
                 ],
               })),
             }),
+      }),
+
+      // 运行日志 —— 默认收起，点开才拉
+      jsx(Panel, {
+        title: '运行日志',
+        hint: showLogs
+          ? (logsQ.data && logsQ.data.lines ? logsQ.data.lines + ' 行' : '')
+          : '排查问题时打开',
+        actions: jsxs('div', { className: 'flex items-center gap-2', children: [
+          showLogs ? jsx(Button, {
+            size: 'sm',
+            variant: 'ghost',
+            onClick: () => logsQ.refetch(),
+            children: '刷新',
+          }) : null,
+          jsx(Button, {
+            size: 'sm',
+            variant: 'ghost',
+            onClick: () => setShowLogs((v) => !v),
+            children: showLogs ? '收起' : '查看',
+          }),
+        ]}),
+        children: !showLogs
+          ? jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children:
+              '日志只记录状态、计数和耗时，不含任何凭证值。' })
+          : logsQ.isLoading
+            ? jsx(GlyphSpinner, { className: 'p-4' })
+            : jsx('div', { className: 'flex flex-col gap-2', children: [
+                jsx('pre', {
+                  className: 'max-h-80 overflow-auto rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3 text-[0.6875rem] leading-relaxed',
+                  children: (logsQ.data && logsQ.data.text) || '（还没有日志）',
+                }),
+                jsx('div', {
+                  className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                  children: (logsQ.data && logsQ.data.file) || '',
+                }),
+              ] }),
       }),
     ],
   })

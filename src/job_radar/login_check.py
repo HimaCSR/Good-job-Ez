@@ -6,6 +6,13 @@
 体检通过浏览器读 cookie（不碰磁盘，也不复制 cookie）。
 """
 
+try:
+    from .logging_setup import get_logger
+except ImportError:          # 脱离包单独导入时（单测）
+    from logging_setup import get_logger
+
+log = get_logger()
+
 import re
 import time
 
@@ -137,6 +144,14 @@ def check_from_cookies(cookies, sites=None):
 
     ok = sum(1 for s in out if s["status"] == "ok")
     need = sum(1 for s in out if s["status"] in ("expired", "expiring"))
+
+    # 只记状态与凭证**名字**，绝不记 cookie 的值
+    for s in out:
+        log.info("登录态 %s: status=%s login_ok=%s risk_ok=%s 凭证=%s 剩余=%s天",
+                 s["label"], s["status"], s["login_ok"], s["risk_ok"],
+                 (re.sub(r"[^\u4e00-\u9fff\w、（）()]", "", s["detail"]) or "-")[:40],
+                 s.get("days_left"))
+
     return {
         "sites": out,
         "summary": {

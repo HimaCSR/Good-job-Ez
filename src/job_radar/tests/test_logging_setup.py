@@ -1,0 +1,78 @@
+"""日志模块的测试 —— 重点是「凭证不进日志」。"""
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from logging_setup import redact, get_logger, log_file, tail, purge  # noqa: E402
+
+
+class TestRedact(unittest.TestCase):
+
+    def test_known_secret_keys_are_masked(self):
+        for text in [
+            "zp_at=abc123def456",
+            "cookie: sessionid=xyz987",
+            "Authorization: Bearer tok_123",
+            "token=ghp_ABCDEFGHIJKLMNOP",
+            "password: hunter2",
+        ]:
+            out = redact(text)
+            self.assertIn("[REDACTED]", out, text)
+            # 原值不能残留
+            for secret in ("abc123def456", "xyz987", "tok_123", "hunter2"):
+                self.assertNotIn(secret, out, text)
+
+    def test_status_text_is_not_masked(self):
+        """状态描述不是密钥 —— 打了就没法排查。"""
+        text = "BOSS直聘已登录（凭证 zp_at），剩余 12 天"
+        self.assertEqual(redact(text), text)
+
+    def test_url_is_not_masked(self):
+        url = "https://www.zhaopin.com/jobdetail/CC398533130J40905945205.htm"
+        self.assertEqual(redact(url), url)
+
+    def test_company_name_is_not_masked(self):
+        text = "杭州东识科技有限公司 · 20-30K"
+        self.assertEqual(redact(text), text)
+
+    def test_long_random_string_is_masked(self):
+        long_token = "A" * 48
+        self.assertIn("[REDACTED]", redact("x=" + long_token))
+
+    def test_none_and_empty(self):
+        self.assertEqual(redact(None), "")
+        self.assertEqual(redact(""), "")
+
+
+class TestLogger(unittest.TestCase):
+
+    def test_logger_is_singleton(self):
+        a = get_logger()
+        b = get_logger()
+        self.assertIs(a, b)
+        # 重复取不能叠加 handler（否则每条日志写两遍）
+        self.assertEqual(len(a.handlers), len(b.handlers))
+
+    def test_write_and_tail(self):
+        log = get_logger()
+        log.info("测试日志行 %d", 12345)
+        text = tail(50)
+        self.assertIn("测试日志行 12345", text)
+
+    def test_secret_never_reaches_file(self):
+        log = get_logger()
+        log.error("zp_at=SHOULDBE_MASKED_98765 登录失败")
+        text = tail(50)
+        self.assertNotIn("SHOULDBE_MASKED_98765", text)
+        self.assertIn("[REDACTED]", text)
+
+    def test_log_file_exists(self):
+        get_logger().info("确保文件存在")
+        self.assertTrue(os.path.exists(log_file()))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

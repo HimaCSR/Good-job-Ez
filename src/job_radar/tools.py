@@ -6,11 +6,19 @@
 
 import json
 import os
+import time
 from datetime import datetime
 
 from . import bbclient, storage
 from .config import load_config, load_profile
 from .matcher import score_job
+
+try:
+    from .logging_setup import get_logger
+except ImportError:          # 脱离包单独导入时（单测）
+    from logging_setup import get_logger
+
+log = get_logger()
 
 # 各站的字段 → 统一词表的映射
 FIELD_MAP = {
@@ -63,14 +71,23 @@ def _fetch_site(site, keyword, cfg):
         data = bbclient.run_site("zhaopin/search", keyword,
                                  "--city", str(cfg["city"]))
         if "error" in data:
+            log.warning("抓取失败 site=zhaopin kw=%s err=%s",
+                        keyword, str(data["error"])[:150])
             return [], data["error"]
-        return data.get("jobs") or [], None
+        jobs = data.get("jobs") or []
+        log.info("抓取完成 site=zhaopin kw=%s jobs=%d", keyword, len(jobs))
+        return jobs, None
     if site == "boss":
         data = bbclient.run_site("boss/search", keyword,
                                  "--city", str(cfg["boss_city"]))
         if "error" in data:
+            log.warning("抓取失败 site=boss kw=%s err=%s",
+                        keyword, str(data["error"])[:150])
             return [], data["error"]
-        return data.get("jobs") or [], None
+        jobs = data.get("jobs") or []
+        log.info("抓取完成 site=boss kw=%s jobs=%d", keyword, len(jobs))
+        return jobs, None
+    log.error("未知站点: %s", site)
     return [], "未知站点: %s" % site
 
 
@@ -80,11 +97,13 @@ def scan(args, **kwargs):
     参数：keywords(可选，覆盖配置)、min_score(可选)、max_jobs(可选)、sites(可选)。
     """
     run_id = None
+    started = time.time()
     try:
         cfg = load_config()
         prof = load_profile()
         keywords = args.get("keywords") or cfg.get("keywords") or []
         if not keywords:
+            log.warning("扫描中止：没有配置关键词")
             return json.dumps({
                 "error": "没有配置关键词",
                 "hint": "设置 plugins.entries.job-radar.settings.keywords，"
@@ -95,7 +114,8 @@ def scan(args, **kwargs):
         limit = int(args.get("max_jobs", cfg["max_jobs_per_run"]))
         sites = args.get("sites") or cfg.get("sites") or ["zhaopin"]
         gap = int(cfg.get("request_gap_seconds", 12))
-
+        log.info("扫描开始 sites=%s keywords=%s limit=%d min_score=%d gap=%ds",
+                 sites, keywords, limit, min_score, gap)
         run_id = storage.start_run()
         seen, results, new_count, errors = 0, [], 0, []
 
@@ -141,6 +161,8 @@ def scan(args, **kwargs):
         results.sort(key=lambda x: -x["score"])
         storage.finish_run(run_id, seen, len(results), new_count,
                            "; ".join(errors)[:300])
+        log.info("扫描完成 耗时=%.1fs 抓到=%d 新增=%d 命中=%d 错误=%d",
+                 time.time() - started, seen, new_count, len(results), len(errors))
         return json.dumps({
             "fetched": seen,
             "new": new_count,
@@ -150,6 +172,7 @@ def scan(args, **kwargs):
             "jobs": results[:10],
         }, ensure_ascii=False)
     except Exception as e:
+        log.exception("扫描异常 耗时=%.1fs", time.time() - started)
         if run_id:
             try:
                 storage.finish_run(run_id, 0, 0, 0, str(e)[:300])
@@ -164,14 +187,16 @@ def daily(args, **kwargs):
         from . import report
         cfg = load_config()
         min_score = int(args.get("min_score", cfg["min_score"]))
-        path = report.build_daily(storage.jobs_since(days=1, min_score=min_score),
-                                  storage.recent_runs(3), min_score)
+        jobs = storage.jobs_since(days=1, min_score=min_score)
+        path = report.build_daily(jobs, storage.recent_runs(3), min_score)
+        log.info("日报生成 jobs=%d path=%s", len(jobs), path)
         return json.dumps({
             "report_path": str(path),
-            "count": len(storage.jobs_since(days=1, min_score=min_score)),
+            "count": len(jobs),
             "message": "日报已生成",
         }, ensure_ascii=False)
     except Exception as e:
+        log.exception("生成日报失败")
         return json.dumps({"error": "生成日报失败: %s" % e}, ensure_ascii=False)
 
 
@@ -234,12 +259,15 @@ def push(args, **kwargs):
         else:
             jobs = storage.all_jobs(limit=50, min_score=min_score)
         msgs = push_mod.build_push(jobs, min_score=min_score, max_jobs=max_jobs)
+        log.info("推送内容生成 jobs=%d msgs=%d only_new=%s",
+                 len(jobs), len(msgs), only_new)
         return json.dumps({
             "count": len(msgs),
             "messages": msgs,
             "note": "按顺序逐条发送；每条已≤50字（URL 除外）",
         }, ensure_ascii=False)
     except Exception as e:
+        log.exception("生成推送失败")
         return json.dumps({"error": "生成推送失败: %s" % e}, ensure_ascii=False)
 
 
@@ -256,6 +284,8 @@ def login_status(args, **kwargs):
             }, ensure_ascii=False)
         sites = args.get("sites") or None
         result = login_check.check_from_cookies(cookies, sites)
+        log.info("登录态体检完成 cookie数=%d 结论=%s",
+                 len(cookies), result["summary"]["verdict"])
         return json.dumps({
             "sites": result["sites"],
             "summary": result["summary"],
@@ -263,4 +293,5 @@ def login_status(args, **kwargs):
             "cookie_count": len(cookies),
         }, ensure_ascii=False)
     except Exception as e:
+        log.exception("登录态体检失败")
         return json.dumps({"error": "登录态体检失败: %s" % e}, ensure_ascii=False)
