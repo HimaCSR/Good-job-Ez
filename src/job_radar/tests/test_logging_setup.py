@@ -35,7 +35,7 @@ class TestRedact(unittest.TestCase):
         self.assertEqual(redact(url), url)
 
     def test_company_name_is_not_masked(self):
-        text = "杭州东识科技有限公司 · 20-30K"
+        text = "某人力资源有限公司 · 20-30K"
         self.assertEqual(redact(text), text)
 
     def test_long_random_string_is_masked(self):
@@ -64,9 +64,9 @@ class TestLogger(unittest.TestCase):
 
     def test_secret_never_reaches_file(self):
         log = get_logger()
-        log.error("zp_at=SHOULDBE_MASKED_98765 登录失败")
+        log.error("zp_at=PLACEHOLDER_VALUE_98765 登录失败")
         text = tail(50)
-        self.assertNotIn("SHOULDBE_MASKED_98765", text)
+        self.assertNotIn("PLACEHOLDER_VALUE_98765", text)
         self.assertIn("[REDACTED]", text)
 
     def test_log_file_exists(self):

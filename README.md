@@ -64,6 +64,16 @@ cp -r src/job_radar "$LOCALAPPDATA/hermes/plugins/job-radar"
 cp -r src/job_radar ~/.hermes/plugins/job-radar
 ```
 
+> **想边改边生效？** 用目录联接（junction）代替拷贝，改代码立刻生效，
+> 不用手动同步。Windows 上要先停掉网关（它锁着插件目录）：
+>
+> ```bash
+> bash scripts/dev.sh link
+> hermes gateway restart
+> ```
+>
+> 回退：`bash scripts/dev.sh unlink`
+
 ### 3. 准备 bb-browser
 
 ```bash
@@ -160,12 +170,19 @@ hermes plugins doctor ~/.hermes/plugins/job-radar --ci
 ## 开发
 
 ```bash
-# 跑测试
+# 跑测试（64 个用例，不需要装任何依赖）
 cd src/job_radar && python -m unittest discover -s tests
 
+# 或者用脚本：测试 + 脱敏扫描 + 仓库卫生，一步到位
+bash scripts/dev.sh check
+
 # 看当前抓取层状态
-python src/job_radar/../job_radar/tests/../  # 详见 docs/抓取层现状.md
+cat docs/抓取层现状.md
 ```
+
+完整开发指南见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，
+功能进度见 **[docs/ROADMAP.md](docs/ROADMAP.md)**，
+改了什么见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ### 目录结构
 
@@ -175,20 +192,30 @@ Good-job-Ez/
 │   ├── plugin.yaml         插件元数据 + 配置 schema
 │   ├── __init__.py         工具注册
 │   ├── tools.py            六个工具的实现
-│   ├── matcher.py          本地打分（五项权重）
+│   ├── matcher.py          本地打分（职位名 30 + 技能 30 + 城市 20 + 薪资 20）
 │   ├── bbclient.py         调用 bb-browser adapter
-│   ├── storage.py          SQLite 岗位池
+│   ├── storage.py          SQLite 岗位池 + 简历/模板表
 │   ├── report.py           Markdown 日报生成
-│   ├── push.py             QQ 消息拆分（50 字上限）
+│   ├── push.py             QQ 消息拆分（50 字上限，URL 不断）
 │   ├── login_check.py      登录态体检（纯函数，可单测）
 │   ├── browser_cookies.py  CDP 读 cookie（不落盘）
-│   └── tests/              单元测试
+│   ├── logging_setup.py    运行日志 + 凭证打码
+│   ├── dashboard/          设置页后端
+│   │   ├── manifest.json       让 Hermes 挂载 API 路由
+│   │   └── plugin_api.py       11 个端点
+│   ├── desktop/plugin.js   桌面端 React 设置页（纯 ESM）
+│   └── tests/              64 个单元测试
 ├── docs/
-│   ├── 开发文档与流程图.html   架构 + 流程图 + 风险清单
-│   ├── 开发文档与流程图.pdf
-│   ├── 设置页-demo.html        设置页 UI demo（未接后端）
-│   └── 抓取层现状.md           实测记录
-└── examples/
+│   ├── 开发文档与流程图.html   架构 + 流程图 + 风险清单（PDF 同名）
+│   ├── 设置页-demo.html        设置页独立预览版
+│   ├── 抓取层现状.md           实测记录
+│   └── ROADMAP.md             功能路线图
+├── examples/               配置示例
+├── scripts/
+│   ├── dev.sh                  开发命令入口
+│   ├── check-sensitive.sh      发布前脱敏扫描
+│   └── check-repo.sh           仓库卫生检查
+└── .github/workflows/ci.yml    push 自动跑测试
 ```
 
 ### 加一个新招聘站
@@ -201,7 +228,7 @@ Good-job-Ez/
 ~/.bb-browser/sites/<站名>/detail.js
 ```
 
-详细写法见 bb-browser 的 site-system 文档。
+统一词表和完整步骤见 [CONTRIBUTING.md](CONTRIBUTING.md#加一个新招聘站)。
 
 ---
 

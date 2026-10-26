@@ -115,7 +115,20 @@ def _plugin_dir() -> str:
 
 
 def _profile_path() -> str:
-    return os.path.join(_plugin_dir(), "profile.yaml")
+    """个人画像路径。
+
+    放在 <plugin-data>/job-radar/ 下，不在插件目录里 ——
+    插件目录开发时是指向 git 仓库的链接，画像是私有数据。
+    """
+    try:
+        from plugins.plugin_storage import plugin_data_dir
+        base = plugin_data_dir("job-radar")
+    except ImportError:
+        base = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "hermes",
+            "plugin-data", "job-radar")
+    os.makedirs(base, exist_ok=True)
+    return os.path.join(base, "profile.yaml")
 
 
 # ── 配置读写（config.yaml 的 plugins.entries.job-radar.settings）────────────
