@@ -372,6 +372,39 @@ def status():
     }
 
 
+def all_switches():
+    """各站的投递开关与每日上限 —— 形状跟真实现一致。
+
+    真实现从 config.yaml 读；mock 从内存读。
+    """
+    return {
+        "sites": {
+            site: {
+                "apply_enabled": SITE_APPLY_ENABLED.get(site, False),
+                "daily_limit": SITE_DAILY_LIMIT.get(site, 0),
+            }
+            for site in SITE_APPLY_ENABLED
+        },
+        "known_sites": list(SITE_APPLY_ENABLED.keys()),
+    }
+
+
+def set_site_switch(site, enabled):
+    """开/关某站的投递开关（mock：内存里改）。"""
+    if site not in SITE_APPLY_ENABLED:
+        raise ValueError("未知站点: %s" % site)
+    SITE_APPLY_ENABLED[site] = bool(enabled)
+    return all_switches()
+
+
+def set_daily_limit(site, limit):
+    """设某站每日上限（mock：内存里改）。"""
+    if site not in SITE_DAILY_LIMIT:
+        raise ValueError("未知站点: %s" % site)
+    SITE_DAILY_LIMIT[site] = max(0, int(limit))
+    return all_switches()
+
+
 def reset():
     """把 mock 状态清回初始（开发时反复调试用）。
 

@@ -1261,6 +1261,19 @@ const SITE_META = {
   huibo: { label: '汇博招聘网', color: '#0A5CA8', creds: [] },
 }
 
+/* 投递开关用的站点名。
+ *
+ * **注意跟 SITE_META 的键不一样**：登录态体检用的是 `zhipin`
+ * （招聘站自己的域名），但岗位记录里的 source 是 `boss`
+ * （抓取层用的名字）。投递按岗位的 source 判，所以这里要用 `boss`。
+ * 两个表别混。
+ */
+const APPLY_SITE_META = {
+  zhaopin: { label: '智联招聘' },
+  boss: { label: 'BOSS直聘' },
+  huibo: { label: '汇博招聘网' },
+}
+
 
 /** mock 模式状态 —— 开发时一眼看到「现在跑的是假数据」。 */
 function useMock(ctx) {
@@ -1277,6 +1290,85 @@ function useLogs(ctx, enabled) {
     queryFn: async () => ctx.rest('/logs?lines=300'),
     enabled: !!enabled,
     staleTime: 5000,
+  })
+}
+
+/** 各站的投递开关与每日上限（投递三道门的第一、三道）。 */
+function useApplySwitches(ctx) {
+  return useQuery({
+    queryKey: ['job-radar', 'apply-switches'],
+    queryFn: async () => ctx.rest('/apply/switches'),
+  })
+}
+
+/* 投递开关面板 —— 第一道门（站点开关）+ 第三道门（每日上限）。
+ *
+ * **开关默认全关**，这是设计：投递不可逆，得用户自己显式打开。
+ * 开关开着不代表能投 —— 中间还有一次性令牌（第二道门），
+ * 那道门在「投递简历」弹层里，点完确认才会签发。
+ */
+function ApplySwitchPanel({ ctx }) {
+  const qc = useQueryClient()
+  const q = useApplySwitches(ctx)
+  const save = useMutation({
+    mutationFn: async (payload) =>
+      ctx.rest('/apply/switches', { method: 'POST', body: payload }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'apply-switches'] })
+      host.notify({ kind: 'success', message: '投递设置已保存' })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String((e && e.message) || e) }),
+  })
+
+  const data = q.data || {}
+  const sites = data.sites || {}
+  const order = data.known_sites || Object.keys(sites)
+
+  if (q.isLoading) return jsx(GlyphSpinner, { className: 'p-4' })
+
+  return jsxs('div', { className: 'flex flex-col gap-2', children:
+    order.map((site) => {
+      const meta = APPLY_SITE_META[site] || { label: site }
+      const info = sites[site] || { apply_enabled: false, daily_limit: 0 }
+      const on = !!info.apply_enabled
+      return jsxs('div', {
+        key: site,
+        className: 'flex items-center gap-3 rounded-md border border-(--ui-stroke-secondary) px-3 py-2',
+        children: [
+          jsxs('div', { className: 'min-w-0 flex-1', children: [
+            jsx('div', { className: 'text-sm font-medium', children: meta.label }),
+            jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)',
+              children: on
+                ? '已允许投递 · 每日上限 ' + (info.daily_limit ?? 0) + ' 份'
+                : '未开启投递（默认关闭）' }),
+          ]}),
+          jsx('label', {
+            className: 'flex items-center gap-1.5 text-xs text-(--ui-text-secondary)',
+            children: [
+              jsx('input', {
+                type: 'number',
+                min: 0,
+                value: String(info.daily_limit ?? 0),
+                disabled: !on,
+                onChange: (e) => save.mutate({
+                  site,
+                  daily_limit: Number(e.target.value) || 0,
+                }),
+                className: 'w-14 rounded border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) px-1.5 py-0.5 text-xs disabled:opacity-50',
+              }),
+              jsx('span', { children: '份/天' }),
+            ],
+          }),
+          jsx('input', {
+            type: 'checkbox',
+            checked: on,
+            disabled: save.isPending,
+            onChange: (e) => save.mutate({ site, enabled: e.target.checked }),
+            className: 'h-3.5 w-3.5 accent-(--ui-accent)',
+          }),
+        ],
+      })
+    })
   })
 }
 
@@ -1343,6 +1435,13 @@ function PlatformView({ ctx, cfg }) {
                 ],
               })),
             }),
+      }),
+
+      // 投递开关 —— 三道门的第一道（站点开关）+ 第三道（每日上限）
+      jsx(Panel, {
+        title: '投递开关',
+        hint: '默认全关。打开后仍需在「投递简历」里逐次确认。',
+        children: jsx(ApplySwitchPanel, { ctx }),
       }),
 
       // 运行日志 —— 默认收起，点开才拉

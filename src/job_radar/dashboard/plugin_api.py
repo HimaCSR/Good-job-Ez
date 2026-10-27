@@ -44,7 +44,7 @@ _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
-    "mock_provider",
+    "mock_provider", "apply_gate",
 )
 
 
@@ -822,6 +822,17 @@ def mock_reset() -> Dict[str, Any]:
 
 
 # ── ① 投递三道门 ────────────────────────────────────────────────────────────
+#
+# **真实现已接**（apply_gate.py）。mock 开关打开时仍走 mock_provider，
+# 接口形状一致 —— 前端不用分两条路。
+
+def _gate():
+    """取闸门实现：mock 开着用 mock，否则用真实现。"""
+    mock = _mock()
+    if mock.enabled():
+        return mock, True
+    return _sibling("apply_gate"), False
+
 
 @router.get("/apply/gate")
 def apply_gate(job_id: str, resume_id: str = "") -> Dict[str, Any]:
@@ -830,42 +841,44 @@ def apply_gate(job_id: str, resume_id: str = "") -> Dict[str, Any]:
     返回能不能投、卡在哪一道门。**只是体检，不投。**
     """
     storage = _sibling("storage")
-    mock = _mock()
+    gate, is_mock = _gate()
     job = storage.get_job(job_id)
     if not job:
         return {"ok": False, "error": "找不到岗位 %s" % job_id}
-    status = mock.gate_status(job, resume_id or None)
+    status = gate.gate_status(job, resume_id or None)
     status["ok"] = True
     status["job_id"] = job_id
     status["job_title"] = job.get("title")
+    status["mock"] = is_mock
     return status
 
 
 @router.post("/apply/token")
 def apply_token(body: Dict[str, Any]) -> Dict[str, Any]:
-    """签发一次性确认令牌（5 分钟有效，绑定 job_id）。"""
-    mock = _mock()
+    """签发一次性确认令牌（5 分钟有效，绑定 job_id + site）。"""
+    gate, is_mock = _gate()
     job_id = (body.get("job_id") or "").strip()
     if not job_id:
         return {"ok": False, "error": "需要 job_id"}
     try:
-        token = mock.issue_token(job_id, body.get("site") or "zhaopin",
+        token = gate.issue_token(job_id, body.get("site") or "zhaopin",
                                  body.get("resume_id") or None)
     except PermissionError as exc:
         return {"ok": False, "stage": "site_switch", "error": str(exc)}
-    return {"ok": True, "token": token, "expires_in": mock.TOKEN_TTL_SECONDS,
-            "job_id": job_id}
+    return {"ok": True, "token": token,
+            "expires_in": gate.TOKEN_TTL_SECONDS,
+            "job_id": job_id, "mock": is_mock}
 
 
 @router.post("/apply/submit")
 def apply_submit(body: Dict[str, Any]) -> Dict[str, Any]:
     """执行投递 —— 过三道门。
 
-    真实现：调招聘站投递接口 + 归档简历 + 打标签。
-    mock：只记账。
+    真实现：过三道门 → 归档简历 + 打标签 → 记账。
+    动作层（真正投出去）还没接，见 apply_gate._submit_to_site。
     """
     storage = _sibling("storage")
-    mock = _mock()
+    gate, is_mock = _gate()
     job_id = (body.get("job_id") or "").strip()
     if not job_id:
         return {"ok": False, "error": "需要 job_id"}
@@ -883,11 +896,57 @@ def apply_submit(body: Dict[str, Any]) -> Dict[str, Any]:
         if not resume:
             return {"ok": False, "error": "找不到简历 %s" % resume_id}
 
-    result = mock.mock_apply(job, resume, body.get("token"))
+    if is_mock:
+        result = gate.mock_apply(job, resume, body.get("token"))
+    else:
+        result = gate.apply(job, resume, body.get("token"))
     if result.get("ok"):
-        log.info("投递（mock）job=%s resume=%s",
-                 job_id, (resume or {}).get("resume_id"))
+        log.info("投递成功 job=%s resume=%s mock=%s",
+                 job_id, (resume or {}).get("resume_id"), is_mock)
     return result
+
+
+# ── 投递开关管理（设置页「平台接入」用）────────────────────────────────────
+
+@router.get("/apply/switches")
+def apply_switches() -> Dict[str, Any]:
+    """各站的投递开关与每日上限。
+
+    **开关默认全关** —— 这是第一道门，用户得自己显式打开。
+    """
+    gate, is_mock = _gate()
+    try:
+        data = gate.all_switches()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    data["ok"] = True
+    data["mock"] = is_mock
+    return data
+
+
+@router.post("/apply/switches")
+def save_apply_switches(body: Dict[str, Any]) -> Dict[str, Any]:
+    """开/关某站的投递开关，或调它的每日上限。
+
+    body: {site, enabled?, daily_limit?}
+    """
+    gate, is_mock = _gate()
+    site = (body.get("site") or "").strip()
+    if not site:
+        return {"ok": False, "error": "需要 site"}
+    try:
+        if body.get("enabled") is not None:
+            gate.set_site_switch(site, bool(body["enabled"]))
+        if body.get("daily_limit") is not None:
+            gate.set_daily_limit(site, int(body["daily_limit"]))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    data = gate.all_switches()
+    data["ok"] = True
+    data["mock"] = is_mock
+    return data
 
 
 # ── ② 经历结构化 ────────────────────────────────────────────────────────────

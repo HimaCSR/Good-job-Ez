@@ -5,6 +5,7 @@ import uuid
 import os
 import sqlite3
 from datetime import datetime
+from typing import List
 
 try:
     from plugins.plugin_storage import plugin_data_dir
@@ -54,6 +55,30 @@ CREATE TABLE IF NOT EXISTS runs (
   started TEXT, finished TEXT,
   fetched INTEGER, matched INTEGER, new_jobs INTEGER, error TEXT
 );
+
+-- 投递三道门：一次性确认令牌
+CREATE TABLE IF NOT EXISTS apply_tokens (
+  token TEXT PRIMARY KEY,
+  job_id TEXT,
+  site TEXT,
+  resume_id TEXT,
+  issued_at TEXT,
+  expires_at TEXT,
+  used_at TEXT
+);
+
+-- 投递记录（过了三道门 + 动作层有回应就记一条）
+CREATE TABLE IF NOT EXISTS apply_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  site TEXT,
+  job_id TEXT,
+  resume_id TEXT,
+  ok INTEGER,
+  detail TEXT,
+  applied_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_apply_records_site_time
+  ON apply_records(site, applied_at);
 """
 
 
@@ -64,10 +89,27 @@ def _ensure_columns(conn):
         conn.execute("ALTER TABLE jobs ADD COLUMN pushed_at TEXT")
 
 
+class _Conn(sqlite3.Connection):
+    """`with` 退出时自动关连接。
+
+    **为什么需要**：`sqlite3.Connection` 自己的 `__exit__` 只提交/回滚事务，
+    **不关连接**。所以 `with _conn() as conn:` 写完了，连接还开着 ——
+    24 个调用点，每个都漏一个句柄。抓取跑一轮就是几十个，
+    跑久了文件句柄吃紧（Windows 上尤其明显）。
+
+    用子类覆盖 `__exit__`：先提交/回滚，再关。
+    """
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def _conn():
     d = plugin_data_dir("job-radar")
     os.makedirs(d, exist_ok=True)
-    conn = sqlite3.connect(os.path.join(d, "jobs.db"))
+    conn = sqlite3.connect(os.path.join(d, "jobs.db"), factory=_Conn)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     _ensure_columns(conn)
@@ -330,3 +372,95 @@ def _load_list(raw) -> List:
         return v if isinstance(v, list) else [v]
     except (ValueError, TypeError):
         return [str(raw)]
+
+
+# ── 投递三道门：令牌与投递记录 ─────────────────────────────────────────────
+#
+# 令牌落库而不是放内存 —— 内存版重启进程就丢，
+# 而且 cron 脚本和网关 API 是两个进程，内存不共享。
+
+def insert_apply_token(token, job_id, site, resume_id, issued_at, expires_at):
+    """落一条令牌。"""
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO apply_tokens
+               (token, job_id, site, resume_id, issued_at, expires_at, used_at)
+               VALUES (?,?,?,?,?,?,NULL)""",
+            (token, job_id or "", site or "", resume_id or "",
+             issued_at, expires_at))
+
+
+def get_apply_token(token):
+    """取一条令牌。取不到返回 None。"""
+    with _conn() as c:
+        c.row_factory = sqlite3.Row
+        r = c.execute("SELECT * FROM apply_tokens WHERE token = ?",
+                      (token or "",)).fetchone()
+    return dict(r) if r else None
+
+
+def delete_apply_token(token):
+    """删掉一条令牌（过期清理用）。"""
+    with _conn() as c:
+        c.execute("DELETE FROM apply_tokens WHERE token = ?", (token or "",))
+
+
+def mark_apply_token_used(token):
+    """把令牌标记成已用 —— 一次性。"""
+    with _conn() as c:
+        c.execute("UPDATE apply_tokens SET used_at = ? WHERE token = ?",
+                  (_now(), token or ""))
+
+
+def count_applies(site, day):
+    """某站某天**尝试**投递了几次。
+
+    **失败的也算** —— 每条记录代表「三道门都过了、动作层已经动手」。
+    如果只算成功的，动作层一坏（比如 adapter 没写好）就变成无限重试，
+    每日上限形同虚设 —— 上限是防失控的，不是防失败的。
+
+    `ok` 列只用来审计（成功还是失败），不参与计数。
+    """
+    with _conn() as c:
+        r = c.execute(
+            """SELECT COUNT(*) FROM apply_records
+               WHERE site = ? AND applied_at LIKE ?""",
+            (site or "", str(day) + "%")).fetchone()
+    return int(r[0]) if r else 0
+
+
+def insert_apply_record(site, job_id, resume_id, ok, detail, applied_at):
+    """记一条投递。"""
+    with _conn() as c:
+        c.execute(
+            """INSERT INTO apply_records
+               (site, job_id, resume_id, ok, detail, applied_at)
+               VALUES (?,?,?,?,?,?)""",
+            (site or "", job_id or "", resume_id or "",
+             1 if ok else 0, detail or "", applied_at))
+
+
+def list_apply_records(limit=20):
+    """最近的投递记录。"""
+    with _conn() as c:
+        c.row_factory = sqlite3.Row
+        rows = c.execute(
+            "SELECT * FROM apply_records ORDER BY id DESC LIMIT ?",
+            (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_resume_after_apply(resume_id, tags=None, source=None, job_id=None):
+    """投递后更新简历档案：打标签、标记来源、关联岗位。"""
+    with _conn() as c:
+        if tags is not None:
+            c.execute("UPDATE resumes SET tags = ? WHERE resume_id = ?",
+                      (json.dumps(tags, ensure_ascii=False), resume_id))
+        if source is not None:
+            c.execute("UPDATE resumes SET source = ? WHERE resume_id = ?",
+                      (source, resume_id))
+        if job_id is not None:
+            c.execute("UPDATE resumes SET job_id = ? WHERE resume_id = ?",
+                      (job_id, resume_id))
+        c.execute("UPDATE resumes SET updated = ? WHERE resume_id = ?",
+                  (_now(), resume_id))

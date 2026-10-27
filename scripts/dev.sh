@@ -53,20 +53,57 @@ cmd_test() {
         || die "测试没过"
 }
 
-# ── check ───────────────────────────────────────────────────────────────
+# ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/3 单元测试 ==="
+    say "=== 1/4 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/3 脱敏扫描 ==="
+    say "=== 2/4 桌面端 JS 语法 ==="
+    cmd_check_desktop_js || die "桌面端 JS 语法不对"
+
+    say ""
+    say "=== 3/4 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 3/3 仓库卫生 ==="
+    say "=== 4/4 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
 
     ok "全部检查通过"
+}
+
+# 桌面端 plugin.js 是**纯 ESM 未编译**的，改坏了不会报错，只是不渲染。
+# 这里做语法自检（只解析，不执行 —— 它 import 的 @hermes/plugin-sdk
+# 在插件目录外，直接 import 会失败）。
+cmd_check_desktop_js() {
+    local node_bin="$PLUGIN_DIR/desktop/plugin.js"
+    local checker="$SCRIPT_DIR/check-desktop-js.mjs"
+    [ -f "$node_bin" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+    [ -f "$checker" ] || { warn "找不到 check-desktop-js.mjs，跳过"; return 0; }
+
+    # node 优先用 Hermes 自带的（PATH 里的可能是 14）
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过桌面端 JS 语法检查"
+        return 0
+    fi
+
+    # **路径要转成 Windows 格式** —— node 是原生 Windows 程序，
+    # 不认 MSYS 的 /盘符/… 路径（会拼成一个不存在的绝对路径，
+    # 直接 MODULE_NOT_FOUND）。
+    local checker_arg="$checker"
+    local target_arg="$node_bin"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$node_bin")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
 }
 
 # ── sync-desktop ────────────────────────────────────────────────────────

@@ -116,6 +116,27 @@ class TestLazyHandlerStream(unittest.TestCase):
         logger.setLevel(logging.INFO)
         logging.shutdown()      # 不该抛
 
+    def test_first_emit_does_not_raise(self):
+        """**第一次写日志**不能抛 `cannot release un-acquired lock`。
+
+        `logging.Handler.handle()` 的顺序是 acquire() → emit() → release()，
+        它在进入 emit **之前**就 acquire 了 handler 当前的 lock。
+        而懒加载 handler 的父类 __init__ 是在首次 emit 里才跑的 ——
+        它会新建一个 lock 把原来那个替换掉，
+        于是 release() 释放了一个从没 acquire 过的锁。
+
+        Python 3.14 上 Handler.handle 的实现不同，看不出来；
+        但 3.11 / 3.12 / 3.13（CI 矩阵）上第一次写日志就崩。
+        """
+        h = _LazyRotatingFileHandler(
+            os.path.join(self.tmp, "first-emit.log"), maxBytes=1024, backupCount=1)
+        logger = logging.getLogger("test_lazy_first_emit_%d" % id(h))
+        logger.handlers = [h]
+        logger.propagate = False
+        logger.setLevel(logging.INFO)
+        logger.info("第一条日志")     # 不该抛
+        self.assertTrue(os.path.exists(os.path.join(self.tmp, "first-emit.log")))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

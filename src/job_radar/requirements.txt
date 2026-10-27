@@ -1,0 +1,11 @@
+# 运行时依赖
+#
+# 插件跑在 Hermes 网关里，Hermes 自带 fastapi / pydantic，
+# 但**单元测试要在干净环境跑**（CI 矩阵 3.11 / 3.12 / 3.13），
+# 所以这里把测试需要的依赖显式列出来。
+#
+# 只列第三方依赖 —— 其余全是标准库。
+
+jinja2>=3.1        # 简历模板渲染（resume_template.py）
+fastapi>=0.110     # 设置页后端 API（dashboard/plugin_api.py）
+pydantic>=2.6      # 同上，API 的请求模型

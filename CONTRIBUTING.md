@@ -43,6 +43,29 @@
 | bb-browser | `$HERMES_HOME/tools/bb-browser/` | 0.14.2 |
 | Chrome | 你自己的 | 开着调试端口 9222 |
 
+第三方依赖（jinja2 / fastapi / pydantic）装在
+`src/job_radar/requirements.txt`：
+
+```bash
+pip install -r src/job_radar/requirements.txt
+```
+
+### ⚠️ 本机 Python ≠ CI Python
+
+| | 版本 | 注解求值 |
+| --- | --- | --- |
+| 本机开发 | 3.14 | 惰性（`-> List[dict]` 少 import **不报错**） |
+| CI 矩阵 | 3.11 / 3.12 / 3.13 | 立即求值（少 import → **NameError，导入即失败**） |
+
+**改完在 3.12 上也跑一遍**：
+
+```bash
+/c/Users/19863/AppData/Local/Programs/Python/Python312/python.exe -m unittest discover -s tests
+```
+
+这条已经踩过：`storage.py` 用了 `List[dict]` 但没 `from typing import List`，
+本机 3.14 全绿，CI 三个版本全红。
+
 ### 目录布局（开发时）
 
 ```
@@ -82,7 +105,7 @@ python -m unittest discover -s tests
 scripts/dev.sh test
 ```
 
-**测试基线：100 个用例全过。** 提交前必须全绿。
+**测试基线：157 个用例全过。** 提交前必须全绿。
 
 测试分三类，都不需要网络和浏览器：
 
@@ -91,8 +114,10 @@ scripts/dev.sh test
 | `test_matcher.py` | 打分规则（关键词命中、技能覆盖率、城市、薪资解析） |
 | `test_push.py` | 50 字拆分、URL 不被切断 |
 | `test_login_check.py` | 登录态判定（用构造的 cookie，不碰浏览器） |
-| `test_logging_setup.py` | **凭证打码**（最重要的一条防线） |
+| `test_logging_setup.py` | **凭证打码**（最重要的一条防线）+ 懒加载 handler |
 | `test_plugin_api.py` | 配置读写、画像读写、路径解析 |
+| `test_apply_gate.py` | **三道门真的能挡住**（真实现，不是 mock） |
+| `test_mock_provider.py` | mock 层的闸门判定（形状跟真实现一致） |
 
 ---
 
@@ -259,12 +284,16 @@ scripts/dev.sh unlink
 | 现象 | 原因 | 怎么办 |
 | --- | --- | --- |
 | `Cannot find a Chromium-based browser` | PATH 里的 node 是 14，没有 `fetch` | 用 Hermes 自带的 node 绝对路径 |
-| BOSS 突然报 `code 37` | **连错了浏览器**，不是被封 | `bb.sh status` 确认连的是哪个 Chrome |
+| BOSS 突然报 code 37 | **连错了浏览器**，不是被封 | `bb.sh status` 确认连的是哪个 Chrome |
 | 配置改了没生效 | 手写 YAML 缩进错，整个节点变空 | 用 `hermes config set` |
 | 桌面端看不到插件 | 有 marker 的插件默认禁用（安全设计） | Settings ▸ Plugins 里手动启用 |
 | 后端端点一直 404 | 缺 `dashboard/manifest.json` | 补上，`api` 字段指向 `plugin_api.py` |
 | `ImportError: relative import` | dashboard 层用了相对导入 | 用 `_sibling()` |
 | 薪资打码 `**-**元` | 该站没登录 | 先在浏览器登录一次 |
+| 本机测试全绿，CI 全红 | 本机 3.14 注解惰性求值，CI 3.11~3.13 立即求值 | 在 3.12 上也跑一遍 |
+| `cannot release un-acquired lock` | 懒加载 handler 首次 emit 时父类换了 lock | 见 `logging_setup._ensure_open` 里的修法 |
+| 配置读出来是空的 | 存了嵌套字典，被打散成顶层键 | 用扁平键 `apply_zhaopin` |
+| 桌面端改完没反应 | 桌面半边是**副本** | `bash scripts/dev.sh sync-desktop`，再 Reload plugins |
 
 ---
 
@@ -275,15 +304,16 @@ scripts/dev.sh unlink
 
 ## 开发模式（mock）
 
-三个功能还没接真实现，用 mock 数据先把前后端跑通：
+三个功能里，**投递三道门已有真实现**（`apply_gate.py`），
+另外两个还在用 mock 数据：
 
-| 功能 | mock 提供什么 | 真实现要做的事 |
-| --- | --- | --- |
-| 投递三道门 | 站点开关 / 一次性令牌 / 每日上限的完整判定 | 令牌落库 + 真实投递接口 |
-| 经历结构化 | 两条虚构经历，支持增删改 | 落库 + 接进简历生成 |
-| 模板转换 | 假的版式参数 | 读 .docx/.pdf/图片并抽版式 |
+| 功能 | 状态 | mock 提供什么 | 真实现要做的事 |
+| --- | --- | --- | --- |
+| 投递三道门 | ✅ 已实现 | （不再需要） | 动作层：调招聘站真实投递接口 |
+| 经历结构化 | ⬜ mock 中 | 两条虚构经历，支持增删改 | 落库 + 接进简历生成 |
+| 模板转换 | ⬜ mock 中 | 假的版式参数 | 读 .docx/.pdf/图片并抽版式 |
 
-**打开方式**（三个来源，优先级从高到低）：
+**mock 开关的三个来源**（优先级从高到低）：
 
 ```bash
 # 1. 环境变量（临时）
@@ -302,5 +332,16 @@ mock_provider.enabled(force=True)
 **平台接入页**会显示「开发模式」横幅，一眼看到现在跑的是真数据还是假数据，
 横幅上还有个「重置」按钮（清掉 mock 的投递计数和令牌）。
 
-**测试**：`tests/test_mock_provider.py` 重点验「三道门真的能挡住」——
-如果 mock 层挡不住，换真实现时很容易把闸门做漏。
+**测试**：`tests/test_mock_provider.py` 验 mock 层的闸门判定；
+`tests/test_apply_gate.py` 验**真实现**的闸门 ——
+两边都要「三道门真的能挡住」，如果闸门做漏了，后面接动作层就来不及了。
+
+### 端到端验证三道门
+
+单测用假 settings 和临时库。要验证「接线对不对」（真配置 + 真库）：
+
+```bash
+cd src/job_radar && python scripts/verify_apply_gate.py
+```
+
+它会写 config.yaml（开关和上限），**跑完自动恢复原值并清理记录**。

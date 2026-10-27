@@ -102,6 +102,18 @@ def drafts_dir() -> str:
 
 # ── 标签 ─────────────────────────────────────────────────────────────────────
 
+def _storage():
+    """取 storage 模块。
+
+    独立跑（单测、脚本）时没有父包，相对导入会炸 —— 退化到同目录导入。
+    """
+    try:
+        from . import storage
+    except ImportError:
+        import storage
+    return storage
+
+
 def build_tags(job, matched):
     """投递时打的标签 = 岗位方向 + 命中技能 + 岗位关键词。
 
@@ -128,7 +140,7 @@ def save_resume(job, matched, html, pdf_path=None, template_id="classic"):
     返回 resume_id。PDF 生成失败也存（只是没有 PDF）—— 宁可少个文件，
     也别丢标签。
     """
-    from . import storage
+    storage = _storage()
 
     rid = uuid.uuid4().hex[:12]
     base = os.path.join(resume_dir(), rid)
@@ -162,8 +174,7 @@ def save_resume(job, matched, html, pdf_path=None, template_id="classic"):
 
 def list_resumes(limit=50):
     """简历档案列表（含标签）。"""
-    from . import storage
-    return storage.list_resumes(limit=limit)
+    return _storage().list_resumes(limit=limit)
 
 
 def resume_matches(job, resume):
@@ -171,7 +182,10 @@ def resume_matches(job, resume):
 
     用简历的标签和岗位要求算重合度。**不调大模型。**
     """
-    from .resume_builder import extract_requirements, normalize
+    try:
+        from .resume_builder import extract_requirements, normalize
+    except ImportError:
+        from resume_builder import extract_requirements, normalize
 
     reqs = extract_requirements(job.get("description") or "", None)
     wanted = {normalize(s["name"]) for s in reqs.get("skills", [])}

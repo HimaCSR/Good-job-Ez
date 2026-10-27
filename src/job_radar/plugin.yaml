@@ -24,3 +24,9 @@ config_schema:
   push_new_only: {type: bool, default: true, description: "只推送新岗位，不重复推旧的"}
   notify_on_failure: {type: bool, default: true, description: "抓取失败时通知我"}
   active_hours: {type: str, default: "09:00 - 22:00", description: "只在这些时段内抓取"}
+  apply_zhaopin: {type: bool, default: false, description: "允许在智联招聘投递简历（第一道门，默认关）"}
+  apply_boss: {type: bool, default: false, description: "允许在 BOSS 直聘投递简历（第一道门，默认关）"}
+  apply_huibo: {type: bool, default: false, description: "允许在汇博招聘投递简历（第一道门，默认关）"}
+  apply_limit_zhaopin: {type: int, default: 5, description: "智联招聘每日投递上限"}
+  apply_limit_boss: {type: int, default: 5, description: "BOSS 直聘每日投递上限"}
+  apply_limit_huibo: {type: int, default: 3, description: "汇博招聘每日投递上限"}

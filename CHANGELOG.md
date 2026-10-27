@@ -11,14 +11,38 @@
 
 ### 新增
 
+- **投递三道门真实现**（`apply_gate.py`）
+  - 站点开关（默认全关）+ 一次性令牌（5 分钟，绑定 job_id + site）+ 每日上限
+  - **令牌落 SQLite**（`apply_tokens` 表）—— 内存版重启就丢，跨进程也不共享
+  - 投递记录落 `apply_records` 表
+  - 配置用**扁平键**（`apply_zhaopin` / `apply_limit_zhaopin`）——
+    嵌套字典会被配置读取器打散成顶层键
+  - 设置页「平台接入」新增「投递开关」面板：每站一个开关 + 每日上限
+  - 动作层（真正投出去）还没接 —— 招聘站投递接口需要站点私有 adapter
 - **定时任务改为脚本模式（不经过 LLM）**
   - `examples/job_radar_cron.py` → 装到 `~/.hermes/scripts/`
   - `hermes cron edit <id> --script job_radar_cron.py --no-agent`
   - **完全不烧 token**，脚本 stdout 直接投递到 QQ；空输出 = 静默
 - **岗位推送去重**：`jobs` 表新增 `pushed_at` 列，只推没推过的岗位
+- **`src/job_radar/requirements.txt`** —— 显式声明 jinja2 / fastapi / pydantic
+- **`scripts/check-desktop-js.mjs`** —— 桌面端 plugin.js 语法自检（只解析不执行）
+- **`src/job_radar/scripts/verify_apply_gate.py`** —— 三道门端到端验证
+  （打真实配置 + 真实库，跑完自动恢复原值并清理）
 
 ### 修复
 
+- **Python 3.11 / 3.12 / 3.13 上插件直接导入失败**
+  - `storage.py` 用了 `List[dict]` 但没 `from typing import List`
+  - 本机是 3.14（注解惰性求值）所以看不出来，**CI 矩阵必炸**
+- **CI 从来没装依赖** —— `jinja2` / `fastapi` / `pydantic` 缺失，
+  main 分支的 CI 一直是红的。现在补上 requirements 并安装
+- **懒加载日志 handler 第一次写日志就崩**（Python 3.11 / 3.12 / 3.13）
+  - `logging.Handler.handle()` 在进入 emit **之前**就 acquire 了 handler 的 lock，
+    而父类 `__init__` 在首次 emit 里才跑，会新建一个 lock 替换掉原来的
+    → `RuntimeError: cannot release un-acquired lock`
+  - Python 3.14 上 `Handler.handle` 实现不同，看不出来
+- **SQLite 连接泄漏** —— `with conn:` 只提交事务、**不关连接**，
+  24 个调用点每个漏一个句柄。改用 `_Conn` 子类，`__exit__` 里关
 - **推送格式还是旧版**：一直带着分数和命中理由，用户早就定了「只发岗位名 · 城市 + 链接」
 - **同一个岗位被反复推送**：`only_new=true` 只看「最近一天首次出现」，
   而 `INSERT OR REPLACE` 每次抓取都重置 `first_seen` 和 `pushed_at`，
@@ -27,13 +51,11 @@
 
 ### 计划中
 
-- **简历匹配优化**：读岗位 JD → 挑核心要求 → 对照真实经历 → 按模板生成定向简历
-- **简历模板库**：4 套内置模板 + 用户上传（.docx / .pdf / 图片）转换，统一存 HTML
-- **投递流程**：两态设计 —— 该岗优化过就直接投优化版，没优化过则弹历史简历按匹配分排序
-  （详见 `docs/开发文档与流程图.html` 第八、九章）
-- **用户简历档案**：投递成功的简历自动存 PDF + 打标签，作为后续简历评分依据
+- **投递动作层**：调招聘站真实投递接口（需要站点私有 adapter）
+- **经历结构化**：落库并接进简历生成（现在只有自由文本，缺公司名和时间）
+- **Word / 图片模板转换**：抽版式参数 → HTML 模板
 - **汇博招聘 adapter**
-- **GitHub Actions CI 与更多站点接入**
+- **Release tag**
 
 ---
 

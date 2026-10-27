@@ -156,8 +156,20 @@ class _LazyRotatingFileHandler(logging.handlers.RotatingFileHandler):
         if self._lazy_ready:
             return
         try:
+            # **必须保住原来的 lock。**
+            # `logging.Handler.handle()` 的流程是 acquire() → emit() → release()，
+            # 它在**进入 emit 之前**就 acquire 了当前 handler 的 lock。
+            # 父类 __init__ 会新建一个 lock 替换掉 ours →
+            # release() 释放的是一个从没 acquire 过的锁 →
+            # `RuntimeError: cannot release un-acquired lock`。
+            #
+            # 这个 bug 在 Python 3.14 上不出现（Handler.handle 的实现不同），
+            # 但在 CI 的 3.11 / 3.12 / 3.13 上必炸 —— 第一次写日志就崩。
+            saved_lock = getattr(self, "lock", None)
             logging.handlers.RotatingFileHandler.__init__(
                 self, self._lazy_filename, *self._lazy_args, **self._lazy_kwargs)
+            if saved_lock is not None:
+                self.lock = saved_lock
             # 父类 __init__ 把 formatter 重置成默认的了 —— 装回来
             if self._lazy_formatter is not None:
                 self.setFormatter(self._lazy_formatter)
