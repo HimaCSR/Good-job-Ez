@@ -667,3 +667,109 @@ def list_templates() -> Dict[str, Any]:
     """简历模板库 —— 内置 4 套 + 用户上传转换的。"""
     resume_template = _sibling("resume_template")
     return {"templates": resume_template.list_all()}
+
+
+# ── 证件照 ────────────────────────────────────────────────────────────────
+#
+# 照片存成**文件**，profile.yaml 里只存路径 ——
+# base64 塞进 JSON 会把画像撑成几 MB，每次读写都拖着走。
+
+PHOTO_MAX_BYTES = 5 * 1024 * 1024   # 5 MB，够用了
+PHOTO_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+def _photo_path() -> str:
+    storage = _sibling("storage")
+    base = os.path.join(os.path.dirname(storage.__file__), "..", "..")
+    # 落到 plugin-data 里，不进插件目录（插件目录可能是仓库链接）
+    try:
+        from plugins.plugin_storage import plugin_data_dir
+        d = plugin_data_dir("job-radar")
+    except ImportError:
+        d = os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes",
+                         "plugin-data", "job-radar")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, "photo")
+
+
+@router.get("/photo")
+def get_photo() -> Dict[str, Any]:
+    """当前证件照（返回 base64，前端直接塞 <img>）。"""
+    d = _photo_path()
+    if not os.path.isdir(d):
+        return {"ok": True, "photo": None}
+    for name in sorted(os.listdir(d)):
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in PHOTO_EXTS:
+            continue
+        fp = os.path.join(d, name)
+        try:
+            with open(fp, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            continue
+        if len(raw) > PHOTO_MAX_BYTES:
+            continue
+        import base64
+        return {"ok": True,
+                "photo": "data:image/%s;base64,%s" % (
+                    ext.lstrip("."), base64.b64encode(raw).decode("ascii")),
+                "filename": name,
+                "bytes": len(raw)}
+    return {"ok": True, "photo": None}
+
+
+@router.post("/photo")
+def upload_photo(body: Dict[str, Any]) -> Dict[str, Any]:
+    """上传证件照。body: {data_base64, filename}
+
+    只收 jpg/png/webp，限 5 MB。存在 plugin-data 里，不进插件目录。
+    """
+    import base64
+    data = body.get("data_base64") or ""
+    if not data:
+        return {"ok": False, "error": "没有收到图片数据"}
+    if "," in data[:80] and data.strip().startswith("data:"):
+        data = data.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except Exception:
+        return {"ok": False, "error": "图片数据不是合法的 base64"}
+    if not raw:
+        return {"ok": False, "error": "图片是空的"}
+    if len(raw) > PHOTO_MAX_BYTES:
+        return {"ok": False, "error": "图片太大（上限 5 MB）"}
+
+    name = os.path.basename(body.get("filename") or "photo.png")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in PHOTO_EXTS:
+        ext = ".png"
+    d = _photo_path()
+    os.makedirs(d, exist_ok=True)
+    # 只留一张，旧的全删
+    for old in os.listdir(d):
+        op = os.path.join(d, old)
+        if os.path.isfile(op):
+            try:
+                os.remove(op)
+            except OSError:
+                pass
+    fp = os.path.join(d, "photo" + ext)
+    with open(fp, "wb") as fh:
+        fh.write(raw)
+    return {"ok": True, "filename": os.path.basename(fp), "bytes": len(raw)}
+
+
+@router.delete("/photo")
+def delete_photo() -> Dict[str, Any]:
+    """删掉证件照。"""
+    d = _photo_path()
+    if os.path.isdir(d):
+        for name in os.listdir(d):
+            fp = os.path.join(d, name)
+            if os.path.isfile(fp):
+                try:
+                    os.remove(fp)
+                except OSError:
+                    pass
+    return {"ok": True}

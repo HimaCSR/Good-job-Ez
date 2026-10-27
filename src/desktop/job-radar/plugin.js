@@ -131,6 +131,110 @@ function useLogin(ctx) {
 
 // ── 个人信息 ────────────────────────────────────────────────────────────────
 
+/* 证件照上传。
+ *
+ * 照片存成**文件**（plugin-data/job-radar/photo/），后端只回 base64 用于预览 ——
+ * profile.yaml 里不塞图片数据。
+ */
+function PhotoUpload({ ctx }) {
+  const [photo, setPhoto] = React.useState(null)
+  const [busy, setBusy] = React.useState(false)
+
+  React.useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await ctx.rest('/photo')
+        if (alive) setPhoto((r && r.photo) || null)
+      } catch (e) {
+        /* 没照片就算了 */
+      }
+    })()
+    return () => { alive = false }
+  }, [ctx])
+
+  const pick = async (e) => {
+    const f = e.target.files && e.target.files[0]
+    e.target.value = ''
+    if (!f) return
+    if (f.size > 5 * 1024 * 1024) {
+      host.notify({ kind: 'error', message: '图片太大（上限 5 MB）' })
+      return
+    }
+    setBusy(true)
+    try {
+      const buf = await f.arrayBuffer()
+      let bin = ''
+      const bytes = new Uint8Array(buf)
+      const CHUNK = 0x8000
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK))
+      }
+      const b64 = btoa(bin)
+      await ctx.rest('/photo', {
+        method: 'POST',
+        body: { data_base64: b64, filename: f.name },
+      })
+      const r = await ctx.rest('/photo')
+      setPhoto((r && r.photo) || null)
+      host.notify({ kind: 'success', message: '证件照已保存' })
+    } catch (err) {
+      host.notify({ kind: 'error', message: String((err && err.message) || err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    try {
+      await ctx.rest('/photo', { method: 'DELETE' })
+      setPhoto(null)
+      host.notify({ kind: 'success', message: '证件照已删除' })
+    } catch (err) {
+      host.notify({ kind: 'error', message: String((err && err.message) || err) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return jsxs('div', { className: 'flex items-start gap-3', children: [
+    jsx('button', {
+      type: 'button',
+      onClick: photo ? remove : undefined,
+      title: photo ? '点击删除' : '点击上传',
+      className: cn(
+        'flex h-24 w-16 shrink-0 flex-col items-center justify-center overflow-hidden',
+        'rounded-md border border-dashed border-(--ui-stroke-strong) text-[0.625rem] text-(--ui-text-tertiary)',
+        photo ? 'border-solid' : 'hover:border-(--ui-stroke-focus)'
+      ),
+      children: photo
+        ? jsx('img', { src: photo, alt: '证件照', className: 'h-full w-full object-cover' })
+        : [busy ? '处理中…' : '点击上传'],
+    }),
+    jsxs('div', { className: 'min-w-0 flex-1', children: [
+      jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-secondary)', children: '证件照' }),
+      jsx('div', { className: 'mt-1 text-[0.625rem] leading-relaxed text-(--ui-text-tertiary)',
+        children: '2:3 比例，jpg/png/webp，5 MB 以内。会嵌进简历模板，文件只存在本机。' }),
+      jsx('input', {
+        type: 'file',
+        accept: 'image/png,image/jpeg,image/webp',
+        className: 'hidden',
+        onChange: pick,
+      }),
+      jsx('button', {
+        type: 'button',
+        onClick: () => {
+          const inp = document.querySelector('input[type=file][accept*="image/png"]')
+          inp && inp.click()
+        },
+        className: 'mt-1.5 rounded-md border border-(--ui-stroke-secondary) px-2 py-1 text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)',
+        children: photo ? '换一张' : '选择图片',
+      }),
+    ]}),
+  ] })
+}
+
 function ProfileView({ ctx, cfg, onSaved }) {
   const qc = useQueryClient()
   const profile = (cfg && cfg.profile) || {}
@@ -164,6 +268,11 @@ function ProfileView({ ctx, cfg, onSaved }) {
         children: jsxs('div', {
           className: 'grid grid-cols-2 gap-4',
           children: [
+            jsx(Field, {
+              label: '证件照',
+              wide: true,
+              children: jsx(PhotoUpload, { ctx }),
+            }),
             jsx(Field, {
               label: '姓名',
               children: jsx(Input, {
@@ -312,6 +421,7 @@ function ProfileView({ ctx, cfg, onSaved }) {
 function JobCard({ job, ctx }) {
   const [open, setOpen] = React.useState(false)
   const [optOpen, setOptOpen] = React.useState(false)
+  const [applyOpen, setApplyOpen] = React.useState(false)
   const score = job.score ?? 0
   const tone = score >= 70 ? 'success' : score >= 50 ? 'warn' : 'muted'
   return jsxs('div', {
@@ -365,6 +475,15 @@ function JobCard({ job, ctx }) {
             onClick: (e) => { e.stopPropagation(); setOptOpen(true) },
             children: '简历匹配优化',
           }),
+          jsx('button', {
+            type: 'button',
+            className: cn(
+              'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1',
+              'text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'
+            ),
+            onClick: (e) => { e.stopPropagation(); setApplyOpen(true) },
+            children: '投递简历',
+          }),
           job.url ? jsx('a', {
             href: job.url,
             target: '_blank',
@@ -382,7 +501,148 @@ function JobCard({ job, ctx }) {
         ctx,
         onClose: () => setOptOpen(false),
       }),
+      applyOpen && jsx(ApplyResumeDialog, {
+        job,
+        ctx,
+        onClose: () => setApplyOpen(false),
+      }),
     ],
+  })
+}
+
+/* 投递简历 —— 历史简历推荐弹层。
+ *
+ * 规则（用户定的）：
+ *   ① 该岗位做过「简历匹配优化」→ 直接用优化后那份投递
+ *   ② 没做过 → 弹历史简历列表，按对该岗的匹配度排序，默认选最高分
+ *
+ * **投递是最后一步，必须用户明确确认。** 这里只到「选定哪份」，
+ * 真正投出去还要再点一次带岗位链接的确认 —— 选定 ≠ 授权。
+ */
+function ApplyResumeDialog({ job, ctx, onClose }) {
+  const [state, setState] = React.useState({ phase: 'loading' })
+  const [picked, setPicked] = React.useState(null)
+
+  React.useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await ctx.rest('/resume/list?job_id=' + encodeURIComponent(job.job_id))
+        if (!alive) return
+        const items = (r && r.resumes) || []
+        setState({ phase: 'ready', items })
+        // 默认选匹配分最高的
+        if (items.length) {
+          const best = items.reduce((a, b) =>
+            (b.match_score || 0) > (a.match_score || 0) ? b : a)
+          setPicked(best.resume_id)
+        }
+      } catch (e) {
+        if (!alive) return
+        setState({ phase: 'error', error: String((e && e.message) || e) })
+      }
+    })()
+    return () => { alive = false }
+  }, [job.job_id, ctx])
+
+  const items = state.items || []
+  const chosen = items.find((r) => r.resume_id === picked)
+
+  return jsx('div', {
+    className: cn('fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6'),
+    onClick: onClose,
+    children: jsxs('div', {
+      className: cn(
+        'flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden',
+        'rounded-xl border border-(--ui-stroke-secondary) bg-(--ui-bg-primary)'
+      ),
+      onClick: (e) => e.stopPropagation(),
+      children: [
+        jsxs('div', {
+          className: 'flex items-center justify-between border-b border-(--ui-stroke-secondary) px-4 py-3',
+          children: [
+            jsxs('div', { children: [
+              jsx('div', { className: 'text-sm font-medium', children: '投递简历' }),
+              jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: job.title || '' }),
+            ]}),
+            jsx('button', {
+              type: 'button',
+              onClick: onClose,
+              className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+              children: '关闭',
+            }),
+          ],
+        }),
+        jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
+          state.phase === 'loading'
+            ? jsx('div', { className: 'py-8 text-center text-xs text-(--ui-text-tertiary)',
+                children: '正在按匹配度排序历史简历…' })
+            : null,
+          state.phase === 'error'
+            ? jsx('div', { className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-xs',
+                children: state.error })
+            : null,
+          state.phase === 'ready' && !items.length
+            ? jsxs('div', {
+                className: 'rounded-md border border-(--ui-stroke-secondary) p-4 text-xs leading-relaxed',
+                children: [
+                  jsx('div', { className: 'text-(--ui-text-primary)', children: '还没有可用的简历。' }),
+                  jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)',
+                    children: '先去「简历匹配优化」生成一份并存进档案，投递时才有东西可选。' }),
+                ],
+              })
+            : null,
+          items.map((r) => jsx('button', {
+            key: r.resume_id,
+            type: 'button',
+            onClick: () => setPicked(r.resume_id),
+            className: cn(
+              'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+              picked === r.resume_id
+                ? 'border-(--ui-stroke-focus) bg-(--ui-bg-secondary)'
+                : 'border-(--ui-stroke-secondary) hover:bg-(--ui-bg-secondary)'
+            ),
+            children: [
+              jsxs('div', { className: 'min-w-0 flex-1', children: [
+                jsx('div', { className: 'truncate text-xs font-medium', children: r.title || '' }),
+                jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+                  children: (r.created || '').slice(0, 10) }),
+                jsxs('div', {
+                  className: 'mt-1.5 flex flex-wrap gap-1',
+                  children: (r.tags || []).slice(0, 6).map((tag, i) => jsx('span', {
+                    key: tag + i,
+                    className: 'rounded bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
+                    children: tag,
+                  })),
+                }),
+              ]}),
+              jsx(Badge, {
+                variant: (r.match_score || 0) >= 70 ? 'success'
+                  : (r.match_score || 0) >= 50 ? 'warn' : 'muted',
+                children: String(r.match_score != null ? r.match_score : '—'),
+              }),
+            ],
+          })),
+          chosen ? jsxs('div', {
+            className: 'mt-1 flex flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3 text-[0.6875rem] text-(--ui-text-secondary)',
+            children: [
+              jsx('div', { className: 'leading-relaxed',
+                children: '选定了：' + (chosen.title || chosen.resume_id) }),
+              jsx('div', { className: 'text-(--ui-text-tertiary)',
+                children: '选定只是「用哪份简历」，不等于授权投递。' }),
+              job.url ? jsx('a', {
+                href: job.url,
+                target: '_blank',
+                rel: 'noreferrer',
+                className: 'w-fit rounded-md border border-(--ui-accent) px-2.5 py-1.5 text-(--ui-text-primary)',
+                children: '去招聘网站投递这份简历',
+              }) : null,
+            ],
+          }) : null,
+        ]}),
+      ],
+    }),
   })
 }
 
@@ -554,19 +814,52 @@ function RecommendView({ ctx, cfg }) {
   const jobs = (jobsQ.data && jobsQ.data.jobs) || []
   const runs = (runsQ.data && runsQ.data.runs) || []
 
+  // 「高级」筛选：默认收起，展开后改动立即生效（和 demo 一致）。
+  // 字段和「设置」页共用 FilterFields —— 同一个东西不该两处长得不一样。
+  const qc = useQueryClient()
+  const [advOpen, setAdvOpen] = React.useState(false)
+  const [local, setLocal] = React.useState(settings)
+  React.useEffect(() => { setLocal(settings) }, [settings])
+  const save = useMutation({
+    mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['job-radar', 'config'] }),
+    onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
+  })
+  const set = (k, v) => {
+    const next = { ...local, [k]: v }
+    setLocal(next)
+    save.mutate(next)
+  }
+
   return jsxs(Fragment, {
     children: [
       jsx(Panel, {
         title: '今日候选',
         hint: jobsQ.isLoading ? '加载中…' : ('命中 ' + jobs.length + ' 条'),
+        actions: jsx(Button, {
+          size: 'sm',
+          variant: advOpen ? 'primary' : 'outline',
+          onClick: () => setAdvOpen((v) => !v),
+          children: advOpen ? '收起' : '高级',
+        }),
         bodyClass: 'p-0',
-        children: jobsQ.isLoading
-          ? jsx(GlyphSpinner, { className: 'p-6' })
-          : jobsQ.isError
-            ? jsx(ErrorState, { message: String(jobsQ.error) })
-            : jobs.length === 0
-              ? jsx(EmptyState, { title: '还没有岗位', description: '跑一次抓取就会出现' })
-              : jsxs('div', {}, jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx }))),
+        children: jsxs('div', {}, [
+          advOpen && jsxs('div', {
+            className: 'border-b border-(--ui-stroke-secondary) px-4 py-3',
+            children: [
+              jsx('div', { className: 'mb-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: '筛选条件 · 改动立即生效' }),
+              jsx(FilterFields, { local, set }),
+            ],
+          }),
+          jobsQ.isLoading
+            ? jsx(GlyphSpinner, { className: 'p-6' })
+            : jobsQ.isError
+              ? jsx(ErrorState, { message: String(jobsQ.error) })
+              : jobs.length === 0
+                ? jsx(EmptyState, { title: '还没有岗位', description: '跑一次抓取就会出现' })
+                : jsxs('div', {}, jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx }))),
+        ]),
       }),
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
@@ -750,9 +1043,21 @@ function SettingsView({ ctx, cfg }) {
           onClick: () => save.mutate(local),
           children: save.isPending ? '保存中…' : '保存',
         }),
-        children: jsxs('div', {
-          className: 'grid grid-cols-2 gap-4',
-          children: [
+        children: jsx(FilterFields, {
+          local,
+          set,
+        }),
+      }),
+    ],
+  })
+}
+
+/* 筛选条件的字段组 —— 「设置」页和「今日候选 ▸ 高级」共用一套，
+ * 免得同一个东西两处长得不一样（之前就是这么对不上的）。 */
+function FilterFields({ local, set }) {
+  return jsxs('div', {
+    className: 'grid grid-cols-2 gap-4',
+    children: [
             jsx(Field, {
               label: '搜索关键词',
               wide: true,
@@ -796,9 +1101,6 @@ function SettingsView({ ctx, cfg }) {
                 onChange: (e) => set('rounds_per_day', Number(e.target.value) || 0),
               }),
             }),
-          ],
-        }),
-      }),
     ],
   })
 }
