@@ -15,6 +15,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLUGIN_DIR="$REPO_ROOT/src/job_radar"
+# 桌面半边独立于 agent 半边 —— agent 半边里不能有 desktop/plugin.js，
+# 否则 Hermes 会把它当「统一包的桌面半边」，默认禁用、还要用户手动启用。
+DESKTOP_SRC="$REPO_ROOT/src/desktop/job-radar"
 
 # Hermes 目录：Windows 下在 LOCALAPPDATA，Linux/macOS 下在 ~/.hermes
 if [ -n "${LOCALAPPDATA:-}" ]; then
@@ -70,7 +73,7 @@ cmd_sync_desktop() {
         warn "先跑 dev.sh link，或者在 Hermes 里 Reload desktop plugins"
         return 1
     fi
-    cp "$PLUGIN_DIR/desktop/plugin.js" "$DESKTOP_COPY/plugin.js"
+    cp "$DESKTOP_SRC/plugin.js" "$DESKTOP_COPY/plugin.js"
     ok "已同步 desktop/plugin.js → 桌面端副本"
     say "${DIM}桌面端有 fs-watch，一般会自动热重载；没反应就点 Plugins → Rescan${OFF}"
 }
@@ -81,7 +84,7 @@ cmd_sync_desktop() {
 #
 # 两处都要 junction：
 #   <hermes>/plugins/job-radar        → 仓库 src/job_radar      （agent 半边）
-#   <hermes>/desktop-plugins/job-radar → 仓库 src/job_radar/desktop（桌面半边）
+#   <hermes>/desktop-plugins/job-radar → 仓库 src/desktop/job-radar（桌面半边）
 #
 # 备份**不能放在 plugins/ 里** —— 桌面端会扫 plugins/ 下的每个目录，
 # 一个残留备份就会触发 "duplicate id" 加载失败。
@@ -124,7 +127,7 @@ cmd_link() {
             rm -rf "$DESKTOP_COPY" 2>/dev/null || warn "删不掉桌面端副本目录"
         fi
         powershell -NoProfile -Command \
-            "cmd /c mklink /J '$DESKTOP_COPY' '$PLUGIN_DIR/desktop'" >/dev/null 2>&1 \
+            "cmd /c mklink /J '$DESKTOP_COPY' '$DESKTOP_SRC'" >/dev/null 2>&1 \
             || die "桌面半边 mklink 失败"
         ok "桌面半边已建 junction"
     fi
@@ -147,8 +150,8 @@ cmd_unlink() {
     if [ -e "$DESKTOP_COPY" ]; then
         rm -rf "$DESKTOP_COPY" 2>/dev/null
         mkdir -p "$DESKTOP_COPY"
-        [ -f "$PLUGIN_DIR/desktop/plugin.js" ] \
-            && cp "$PLUGIN_DIR/desktop/plugin.js" "$DESKTOP_COPY/plugin.js"
+        [ -f "$DESKTOP_SRC/plugin.js" ] \
+            && cp "$DESKTOP_SRC/plugin.js" "$DESKTOP_COPY/plugin.js"
         ok "桌面半边已还原成普通目录"
     fi
 }

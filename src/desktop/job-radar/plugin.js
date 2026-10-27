@@ -1,7 +1,7 @@
 /**
  * 好岗好找 Good-job-Ez —— Hermes 桌面端设置页。
  *
- * 位置：$HERMES_HOME/plugins/job-radar/desktop/plugin.js
+ * 位置：$HERMES_HOME/desktop-plugins/job-radar/plugin.js
  * 纯 ESM，未编译 —— UI 用 jsx() 调用，不能写 JSX 语法。
  * 只允许 import '@hermes/plugin-sdk'、'react'、'react/jsx-runtime'。
  *

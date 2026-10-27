@@ -41,7 +41,7 @@ echo
 echo "必要文件检查…"
 for f in README.md LICENSE CHANGELOG.md CONTRIBUTING.md .gitignore .gitattributes \
          src/job_radar/plugin.yaml src/job_radar/dashboard/manifest.json \
-         src/job_radar/dashboard/plugin_api.py src/job_radar/desktop/plugin.js \
+         src/job_radar/dashboard/plugin_api.py src/desktop/job-radar/plugin.js \
          src/job_radar/profile.example.yaml docs/ROADMAP.md; do
     if [ -f "$f" ]; then
         ok "$f"

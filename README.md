@@ -223,7 +223,7 @@ Good-job-Ez/
 │   ├── dashboard/          设置页后端
 │   │   ├── manifest.json       让 Hermes 挂载 API 路由
 │   │   └── plugin_api.py       11 个端点
-│   ├── desktop/plugin.js   桌面端 React 设置页（纯 ESM）
+│   ├── （桌面半边在 src/desktop/job-radar/plugin.js）
 │   └── tests/              64 个单元测试
 ├── docs/
 │   ├── 开发文档与流程图.html   架构 + 流程图 + 风险清单（PDF 同名）
