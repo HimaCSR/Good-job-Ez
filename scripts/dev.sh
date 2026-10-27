@@ -16,9 +16,10 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PLUGIN_DIR="$REPO_ROOT/src/job_radar"
-# 桌面半边独立于 agent 半边 —— agent 半边里不能有 desktop/plugin.js，
-# 否则 Hermes 会把它当「统一包的桌面半边」，默认禁用、还要用户手动启用。
-DESKTOP_SRC="$REPO_ROOT/src/desktop/job-radar"
+# 桌面半边在 agent 半边里（Hermes 的「统一包」形态）。
+# 代价：桌面端默认禁用，要去 Settings ▸ Plugins 手动开一次；
+# 好处：一个开关管两半、Plugins 页里配对显示、卸载会连带清理。
+DESKTOP_SRC="$PLUGIN_DIR/desktop"
 
 # Hermes 目录：Windows 下在 LOCALAPPDATA，Linux/macOS 下在 ~/.hermes
 if [ -n "${LOCALAPPDATA:-}" ]; then
@@ -127,26 +128,28 @@ cmd_link() {
         ok "agent 半边已建 junction"
     fi
 
-    # ② 桌面半边
-    local dlt
-    dlt="$(powershell -NoProfile -Command \
-        "(Get-Item '$(winpath "$DESKTOP_COPY")').LinkType" 2>/dev/null | tr -d '\r')"
-    if [ "$dlt" = "Junction" ]; then
-        ok "桌面半边已是 junction"
-    else
-        if [ -e "$DESKTOP_COPY" ]; then
-            rm -rf "$DESKTOP_COPY" 2>/dev/null || warn "删不掉桌面端副本目录"
-        fi
-        powershell -NoProfile -Command \
-            "cmd /c mklink /J '$(winpath "$DESKTOP_COPY")' '$(winpath "$DESKTOP_SRC")'" >/dev/null 2>&1 \
-            || die "桌面半边 mklink 失败"
-        ok "桌面半边已建 junction"
+    # ② 桌面半边：普通目录 + 同步（不是 junction）
+    #
+    # Hermes 的「统一包」形态：agent 半边在 plugins/<name>/，
+    # 桌面半边由 Electron 从 plugins/<name>/desktop/ **复制**到
+    # desktop-plugins/<name>/，并盖上 .hermes-package.json marker。
+    #
+    # 桌面端必须是**副本** —— 它要带 marker 才会被认成统一包的半边，
+    # 也才会跟 agent 行配对显示、共用一个开关。
+    if [ ! -f "$DESKTOP_SRC/plugin.js" ]; then
+        die "找不到 $DESKTOP_SRC/plugin.js"
     fi
+    mkdir -p "$DESKTOP_COPY"
+    cp "$DESKTOP_SRC/plugin.js" "$DESKTOP_COPY/plugin.js"
+    ok "桌面半边已同步"
 
     say ""
-    ok "仓库现在是唯一真相源 —— 改代码即生效"
+    ok "agent 半边改代码即生效（junction）"
+    say "${DIM}桌面半边是副本：改完跑 bash scripts/dev.sh sync-desktop${OFF}"
     say "${DIM}桌面端需要重启 Hermes 桌面 app（或 Plugins → Rescan）才会重新加载${OFF}"
     say "${DIM}网关侧建议重启一次：hermes gateway restart${OFF}"
+    say ""
+    warn "桌面端默认禁用 —— 去 Settings ▸ Plugins 把「好岗好找」打开一次"
 }
 
 cmd_unlink() {
@@ -196,7 +199,7 @@ cmd_install() {
     fi
 
     PLUGIN_DIR="$REPO_ROOT/src/job_radar"
-    DESKTOP_SRC="$REPO_ROOT/src/desktop/job-radar"
+    DESKTOP_SRC="$PLUGIN_DIR/desktop"
 
     [ -d "$PLUGIN_DIR" ] || die "找不到 $PLUGIN_DIR"
     [ -f "$DESKTOP_SRC/plugin.js" ] || die "找不到 $DESKTOP_SRC/plugin.js"
@@ -207,12 +210,12 @@ cmd_install() {
     ok "装好了"
     say ""
     say "接下来："
-    say "  1. 重启 Hermes 桌面 app —— 设置页 ▸ 插件 里会出现「好岗好找」"
+    say "  1. 重启 Hermes 桌面 app"
     say "  2. 重启网关，让新的 agent 半边生效：hermes gateway restart"
     say "  3. 设置页里填个人信息、期望城市、技能（还有「真实经历」）"
     say "  4. 平台接入页检查登录态；没登录就在浏览器里登录招聘站"
     say ""
-    say "${DIM}桌面端不需要再去 Settings ▸ Plugins 手动启用 —— 装出来就是默认启用${OFF}"
+    warn "桌面端默认禁用 —— 去 Settings ▸ Plugins 把「好岗好找」打开一次（只需一次）"
 }
 
 # ── logs ────────────────────────────────────────────────────────────────

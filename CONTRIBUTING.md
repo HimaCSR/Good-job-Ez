@@ -165,7 +165,7 @@ tail -f "$LOCALAPPDATA/hermes/plugin-data/job-radar/logs/job-radar.log"
 
 | 文件 | 用途 |
 | --- | --- |
-| `src/desktop/job-radar/plugin.js` | **真正运行的**桌面端 React 设置页 |
+| `src/job_radar/desktop/plugin.js` | **真正运行的**桌面端 React 设置页 |
 | `docs/设置页-demo.html` | 独立预览版（单文件 HTML，可直接双击打开） |
 
 `plugin.js` 是**纯 ESM，未编译**，UI 用 `jsx()` 调用，**不能写 JSX 语法**。

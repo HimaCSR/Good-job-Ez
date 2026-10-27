@@ -52,7 +52,7 @@
 - **后端 API**（`dashboard/plugin_api.py`，11 个端点）
   - `GET /config /jobs /runs /login /report /resumes /templates /logs`
   - `POST /settings /profile /templates /logs/purge`
-- **桌面端设置页**（`src/desktop/job-radar/plugin.js`）
+- **桌面端设置页**（`src/job_radar/desktop/plugin.js`）
   - 主入口 `ctx.registerSettingsPage`，五个子页：个人信息 / 岗位推荐 /
     用户简历 / 平台接入 / 日报
   - 左侧栏入口 + `/job-radar` 路由

@@ -41,7 +41,7 @@ echo
 echo "必要文件检查…"
 for f in README.md LICENSE CHANGELOG.md CONTRIBUTING.md .gitignore .gitattributes \
          src/job_radar/plugin.yaml src/job_radar/dashboard/manifest.json \
-         src/job_radar/dashboard/plugin_api.py src/desktop/job-radar/plugin.js \
+         src/job_radar/dashboard/plugin_api.py src/job_radar/desktop/plugin.js \
          src/job_radar/profile.example.yaml docs/ROADMAP.md; do
     if [ -f "$f" ]; then
         ok "$f"
@@ -90,7 +90,7 @@ if [ -d "$RUNTIME" ]; then
     LINKTYPE="$(powershell -NoProfile -Command \
         "(Get-Item '$RUNTIME').LinkType" 2>/dev/null | tr -d '\r')"
     if [ "$LINKTYPE" = "Junction" ]; then
-        ok "运行目录是 junction → 仓库即运行副本（无需同步）"
+        ok "agent 半边是 junction → 仓库即运行副本（无需同步）"
         RUNTIME=""
     fi
 fi
@@ -113,6 +113,32 @@ if [ -n "$RUNTIME" ] && [ -d "$RUNTIME" ]; then
     [ "$DRIFT" -eq 0 ] && ok "运行副本与仓库一致（$CHECKED 个文件）"
 elif [ -n "$RUNTIME" ]; then
     warn "找不到运行副本（$RUNTIME）"
+fi
+
+# ⑤ 桌面半边是**副本**（Hermes 统一包形态：Electron 从 agent 半边复制过去，
+# 并盖 .hermes-package.json marker 让它跟 agent 行配对、共用一个开关）。
+# 副本会漂移 —— 仓库改了 plugin.js 不同步，桌面端还是旧的。
+if [ -n "${LOCALAPPDATA:-}" ]; then
+    DESKTOP_COPY="$LOCALAPPDATA/hermes/desktop-plugins/job-radar"
+else
+    DESKTOP_COPY="$HOME/.hermes/desktop-plugins/job-radar"
+fi
+echo
+echo "桌面半边副本检查…"
+if [ -f "$DESKTOP_COPY/plugin.js" ]; then
+    if cmp -s "$DESKTOP_COPY/plugin.js" "src/job_radar/desktop/plugin.js"; then
+        ok "桌面端 plugin.js 与仓库一致"
+    else
+        bad "桌面端 plugin.js 与仓库不一致"
+        printf '      → 跑 bash scripts/dev.sh sync-desktop\n'
+    fi
+    if [ -f "$DESKTOP_COPY/.hermes-package.json" ]; then
+        ok "桌面端带 marker（统一包形态）"
+    else
+        warn "桌面端没有 .hermes-package.json —— 它不会被认成统一包的半边"
+    fi
+else
+    warn "找不到桌面端副本（$DESKTOP_COPY）—— 桌面端没装？"
 fi
 
 echo

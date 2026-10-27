@@ -997,40 +997,35 @@
 <h3>13.3 仓库即运行副本（junction 模式）</h3>
 
 <div class="note">
-  <b>两处都是 junction</b>：<br>
-  <code>&lt;hermes&gt;/plugins/job-radar</code> → 仓库 <code>src/job_radar</code>（agent 半边）<br>
-  <code>&lt;hermes&gt;/desktop-plugins/job-radar</code> → 仓库 <code>src/desktop/job-radar</code>（桌面半边）<br><br>
-  <b>改代码即生效</b>，不用再手工同步副本。实测：仓库里写文件，运行目录立刻可见。
+  <b>agent 半边是 junction</b>：<br>
+  <code>&lt;hermes&gt;/plugins/job-radar</code> → 仓库 <code>src/job_radar</code><br><br>
+  <b>改代码即生效</b>，不用手工同步副本。实测：仓库里写文件，运行目录立刻可见。
 </div>
 
 <div class="warn">
-  <b>桌面半边为什么不能放在 agent 半边里</b><br><br>
-  Hermes 看到 <code>plugins/&lt;名字&gt;/desktop/plugin.js</code> 就会把它当
-  「统一包的桌面半边」：Electron 复制到 <code>desktop-plugins/</code> 并盖上
-  <code>.hermes-package.json</code>，渲染进程看到 marker 就判定为
-  <code>defaultEnabled: false</code> —— 插件默认禁用，<b>必须用户去
-  Settings ▸ Plugins 手动启用一次</b>。<br><br>
-  试过几条路都走不通：<br>
-  · 删 marker —— Electron 每轮 reconcile 都重新写回去<br>
-  · 写不带 <code>package</code> 的 marker —— 渲染进程不认，但 Electron 的
-  <code>readMarker</code> 要求 <code>package &amp;&amp; source</code>，读不到就每轮重写<br>
-  · 改 Electron 的 LevelDB 写 <code>pluginDecisions</code> —— 太脆<br><br>
-  <b>可行解</b>：把桌面半边从 agent 半边里搬出去（<code>src/desktop/job-radar/</code>）。
-  agent 半边没有 <code>desktop/</code> → Electron 不 materialize → 不写 marker →
-  桌面端以独立插件形态加载 → <b>默认启用</b>。
+  <b>桌面半边是副本，必须手动同步</b><br><br>
+  桌面半边在 <code>src/job_radar/desktop/</code>（Hermes 的「统一包」形态）：
+  Electron 把它<b>复制</b>到 <code>desktop-plugins/job-radar/</code>，
+  并盖上 <code>.hermes-package.json</code> marker，
+  让 Plugins 页能把它跟 agent 行配对显示、共用一个开关。<br><br>
+  改完仓库里的 <code>desktop/plugin.js</code>，要跑
+  <code>bash scripts/dev.sh sync-desktop</code>。
+  <code>check-repo.sh</code> 会检查这份副本有没有漂移。
 </div>
 
 <div class="note">
-  <b>新设备上也是默认启用的</b><br><br>
-  Hermes 从 git 安装桌面插件时，<code>detectPluginComponents()</code> 先判断
-  仓库里有没有 agent 半边：有 → 盖 marker → 判定为「统一包」→ opt-in；
-  <b>没有 → 不盖 marker → 独立插件 → 默认启用</b>。<br><br>
-  所以桌面半边单独放一个目录（<code>src/desktop/job-radar/</code>），
-  新设备上装出来就是开着的，不用手动去设置里点一次。
+  <b>代价：桌面端默认禁用</b><br><br>
+  有 marker → Hermes 判定它是「统一包的桌面半边」→ <code>defaultEnabled: false</code>
+  → 要去 Settings ▸ Plugins 手动打开一次。<br><br>
+  换来的是：一个开关管两半、Plugins 页里配对显示、
+  <code>plugins remove</code> 会连带清理桌面半边。
+  曾经试过把桌面半边拆出去单独放（<code>src/desktop/job-radar/</code>）
+  来绕过这个 —— 能默认启用，但 Plugins 页变成两个条目、
+  卸载会留孤儿目录。用户选了保持统一包形态。
 </div>
 
 <div class="note">
-  <b>备份不能放在 <code>plugins/</code> 里</b> —— 桌面端会扫那儿的每个目录，
+  <b>备份不能放在 <code>plugins/</code> 里</b> —— 桌面端会扫那儿每个目录，
   残留的 <code>job-radar.bak-*</code> 会触发 <code>duplicate id</code> 加载失败。
   现在备份统一放 <code>&lt;hermes&gt;/plugin-backups/</code>。
 </div>
