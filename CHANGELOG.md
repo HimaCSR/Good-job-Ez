@@ -11,6 +11,16 @@
 
 ### 新增
 
+- **招聘站浏览器与登录**（`browser_session.py`）
+  - 登录态只在浏览器里 → 插件不碰密码、不碰验证码，给用户一个
+    「打开招聘网站登录」的地方
+  - **用 bb-browser 自己起的浏览器**（有可见窗口、profile 持久化，
+    浏览器完全重启后 cookie 一个不少）—— 不接管用户的日常 Chrome
+  - 抓取前自动确保浏览器在跑（`bbclient.run_site` 里调
+    `ensure_browser()`）
+  - 设置页「平台接入」新增「招聘站登录」面板：每站一个登录按钮
+  - API：`GET /browser/status`、`POST /browser/login`
+  - **不硬编码任何本机路径** —— 别人设备上也能用
 - **投递三道门真实现**（`apply_gate.py`）
   - 站点开关（默认全关）+ 一次性令牌（5 分钟，绑定 job_id + site）+ 每日上限
   - **令牌落 SQLite**（`apply_tokens` 表）—— 内存版重启就丢，跨进程也不共享
@@ -27,7 +37,8 @@
 - **`src/job_radar/requirements.txt`** —— 显式声明 jinja2 / fastapi / pydantic
 - **`scripts/check-desktop-js.mjs`** —— 桌面端 plugin.js 语法自检（只解析不执行）
 - **`src/job_radar/scripts/verify_apply_gate.py`** —— 三道门端到端验证
-  （打真实配置 + 真实库，跑完自动恢复原值并清理）
+- **`src/job_radar/scripts/verify_browser_session.py`** —— 浏览器会话端到端验证
+  （真的关掉浏览器再拉起来，验证 cookie 持久化）
 
 ### 修复
 
@@ -43,6 +54,8 @@
   - Python 3.14 上 `Handler.handle` 实现不同，看不出来
 - **SQLite 连接泄漏** —— `with conn:` 只提交事务、**不关连接**，
   24 个调用点每个漏一个句柄。改用 `_Conn` 子类，`__exit__` 里关
+- **单测只隔离了配置读路径** —— 写路径会真调 `hermes config set`：
+  本机污染用户 config.yaml，CI 上没 CLI 直接抛错
 - **推送格式还是旧版**：一直带着分数和命中理由，用户早就定了「只发岗位名 · 城市 + 链接」
 - **同一个岗位被反复推送**：`only_new=true` 只看「最近一天首次出现」，
   而 `INSERT OR REPLACE` 每次抓取都重置 `first_seen` 和 `pushed_at`，

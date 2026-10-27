@@ -44,7 +44,7 @@ _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
-    "mock_provider", "apply_gate",
+    "mock_provider", "apply_gate", "browser_session",
 )
 
 
@@ -904,6 +904,44 @@ def apply_submit(body: Dict[str, Any]) -> Dict[str, Any]:
         log.info("投递成功 job=%s resume=%s mock=%s",
                  job_id, (resume or {}).get("resume_id"), is_mock)
     return result
+
+
+# ── 招聘站浏览器与登录 ──────────────────────────────────────────────────────
+#
+# 登录态只在浏览器里。插件不碰密码、不碰验证码 ——
+# 给用户一个「打开招聘网站登录」按钮，在插件专用的浏览器里手动登录一次，
+# cookie 会持久化到磁盘，之后抓取和投递都复用它。
+
+@router.get("/browser/status")
+def browser_status() -> Dict[str, Any]:
+    """招聘站浏览器状态：9222 通不通、cookie 几个、哪些站已登录。"""
+    browser_session = _sibling("browser_session")
+    try:
+        data = browser_session.status()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    data["ok"] = True
+    return data
+
+
+@router.post("/browser/login")
+def browser_login(body: Dict[str, Any]) -> Dict[str, Any]:
+    """在插件专用的浏览器里打开某招聘站的登录页。
+
+    body: {site}
+    """
+    browser_session = _sibling("browser_session")
+    site = (body.get("site") or "").strip()
+    if not site:
+        return {"ok": False, "error": "需要 site"}
+    try:
+        result = browser_session.open_login(site)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    if not result.get("ok"):
+        return {"ok": False, "error": result.get("detail") or "打开登录页失败"}
+    return {"ok": True, "site": site, "url": result.get("url"),
+            "tab": result.get("tab"), "detail": result.get("detail")}
 
 
 # ── 投递开关管理（设置页「平台接入」用）────────────────────────────────────

@@ -15,6 +15,11 @@ import random
 import subprocess
 import time
 
+try:
+    from . import browser_session
+except ImportError:          # 脱离包单独导入时（单测）
+    import browser_session
+
 BB_SH = os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes", "tools",
                      "bb-browser", "bb.sh")
 BASE_GAP = 12          # 秒，基准间隔
@@ -57,7 +62,16 @@ def run_site(site, *args, timeout=120):
 
     每次调用都记一条日志：站点、参数、耗时、返回大小、错误类型。
     凭证和 cookie 不进日志（logging_setup 会再打码一层）。
+
+    **先确保浏览器在跑** —— 9222 上没浏览器时，bb-browser 会自己起一个
+    （profile 持久化，登录态存磁盘）。不确保的话，用户第一次抓取会看到
+    「环境异常」或薪资打码，却不知道是浏览器没起。
     """
+    ready = browser_session.ensure_browser()
+    if not ready.get("ok"):
+        log.warning("浏览器没起来，adapter 可能失败: %s", ready.get("detail"))
+        return {"error": "招聘站浏览器没起来：%s" % ready.get("detail")}
+
     cmd = _cmd("site", site, *args, "--json")
     started = time.time()
     try:

@@ -1274,6 +1274,12 @@ const APPLY_SITE_META = {
   huibo: { label: '汇博招聘网' },
 }
 
+/* 招聘站登录入口 —— 跟 backend 的 browser_session.LOGIN_URLS 对应。 */
+const BROWSER_LOGIN_SITES = {
+  zhaopin: { label: '智联招聘' },
+  boss: { label: 'BOSS直聘' },
+}
+
 
 /** mock 模式状态 —— 开发时一眼看到「现在跑的是假数据」。 */
 function useMock(ctx) {
@@ -1372,6 +1378,77 @@ function ApplySwitchPanel({ ctx }) {
   })
 }
 
+/* 招聘站登录面板 —— 登录态只在浏览器里，插件不碰密码。
+ *
+ * 点「登录智联招聘」→ 弹出插件专用的浏览器 → 用户在里面正常登录 →
+ * cookie 持久化到磁盘，之后抓取和投递都复用它。
+ *
+ * **不接管用户的日常 Chrome** —— 那个默认不开调试端口，
+ * 开了 Chrome 还会弹「远程调试」警告。
+ */
+function LoginPanel({ ctx }) {
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['job-radar', 'browser-status'],
+    queryFn: async () => ctx.rest('/browser/status'),
+    refetchInterval: 15000,
+  })
+  const open = useMutation({
+    mutationFn: async (site) =>
+      ctx.rest('/browser/login', { method: 'POST', body: { site } }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'browser-status'] })
+      host.notify({
+        kind: 'success',
+        message: (r && r.detail) || '已打开登录页，在弹出的浏览器里登录即可',
+      })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String((e && e.message) || e) }),
+  })
+
+  const data = q.data || {}
+  const loggedIn = data.logged_in || {}
+  const alive = data.cdp_alive
+  const rows = Object.keys(BROWSER_LOGIN_SITES).map((site) => {
+    const meta = BROWSER_LOGIN_SITES[site]
+    const on = !!loggedIn[site]
+    return jsxs('div', {
+      key: site,
+      className: 'flex items-center gap-3 rounded-md border border-(--ui-stroke-secondary) px-3 py-2',
+      children: [
+        jsx('span', {
+          className: cn('text-xs font-semibold',
+            on ? 'text-(--ui-green)' : 'text-(--ui-text-tertiary)'),
+          children: on ? '✓' : '·',
+        }),
+        jsxs('div', { className: 'min-w-0 flex-1', children: [
+          jsx('div', { className: 'text-sm font-medium', children: meta.label }),
+          jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)',
+            children: on ? '已登录' : '未登录（登录后一直有效，不用反复登）' }),
+        ]}),
+        jsx('button', {
+          type: 'button',
+          disabled: open.isPending,
+          onClick: () => open.mutate(site),
+          className: cn('rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1',
+            'text-[0.6875rem] text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)',
+            'disabled:opacity-50'),
+          children: on ? '重新登录' : '登录',
+        }),
+      ],
+    })
+  })
+
+  const banner = !alive ? jsx('div', {
+    className: 'mb-3 rounded-md border border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
+    children: '招聘站浏览器没在跑 —— 点下面的「登录」会自动拉起一个专用浏览器（只在这一个里登录，不碰你日常的 Chrome）',
+  }) : null
+
+  return jsxs('div', { className: 'flex flex-col gap-2', children:
+    [banner].concat(rows)
+  })
+}
+
 function PlatformView({ ctx, cfg }) {
   const loginQ = useLogin(ctx)
   const sites = (loginQ.data && loginQ.data.sites) || []
@@ -1435,6 +1512,13 @@ function PlatformView({ ctx, cfg }) {
                 ],
               })),
             }),
+      }),
+
+      // 招聘站登录 —— 最重要，放首位（没登录态后面全白搭）
+      jsx(Panel, {
+        title: '招聘站登录',
+        hint: '登录一次就长期有效，不用反复登',
+        children: jsx(LoginPanel, { ctx }),
       }),
 
       // 投递开关 —— 三道门的第一道（站点开关）+ 第三道（每日上限）
