@@ -57,12 +57,27 @@ cd Good-job-Ez
 ### 2. 装到 Hermes 插件目录
 
 ```bash
+# 一条命令搞定（Windows junction / macOS-Linux 软链）
+bash scripts/dev.sh link
+```
+
+想手动来：
+
+```bash
 # Windows
-cp -r src/job_radar "$LOCALAPPDATA/hermes/plugins/job-radar"
+cmd /c mklink /J "$LOCALAPPDATA\hermes\plugins\job-radar" "%CD%\src\job_radar"
+cmd /c mklink /J "$LOCALAPPDATA\hermes\desktop-plugins\job-radar" "%CD%\src\desktop\job-radar"
 
 # macOS / Linux
-cp -r src/job_radar ~/.hermes/plugins/job-radar
+ln -s "$PWD/src/job_radar" ~/.hermes/plugins/job-radar
 ```
+
+**为什么用链接而不是复制**：仓库成为唯一真相源 —— 改代码即生效，
+不用来回同步两份。`bash scripts/dev.sh unlink` 可以还原成普通目录。
+
+> 桌面半边单独放在 `src/desktop/job-radar/`，**不要**放进
+> `src/job_radar/desktop/` —— 那样 Hermes 会把它当「统一包的桌面半边」，
+> 桌面端默认禁用，得手动去设置里开一次。
 
 > **想边改边生效？** 用目录联接（junction）代替拷贝，改代码立刻生效，
 > 不用手动同步。Windows 上要先停掉网关（它锁着插件目录）：
@@ -190,7 +205,7 @@ hermes cron run <job_id>
 ## 开发
 
 ```bash
-# 跑测试（64 个用例，不需要装任何依赖）
+# 跑测试（100 个用例，不需要装任何依赖）
 cd src/job_radar && python -m unittest discover -s tests
 
 # 或者用脚本：测试 + 脱敏扫描 + 仓库卫生，一步到位
@@ -223,8 +238,14 @@ Good-job-Ez/
 │   ├── dashboard/          设置页后端
 │   │   ├── manifest.json       让 Hermes 挂载 API 路由
 │   │   └── plugin_api.py       11 个端点
-│   ├── （桌面半边在 src/desktop/job-radar/plugin.js）
-│   └── tests/              64 个单元测试
+│   ├── resume_template.py  四套内置简历模板
+│   ├── resume_builder.py   JD → 要求 → 经历证据 → 渲染
+│   ├── resume_store.py     Chrome headless 导出 PDF + 简历档案标签
+│   └── tests/              100 个单元测试
+├── src/desktop/job-radar/
+│   └── plugin.js           桌面半边（设置页，纯 ESM React）
+│                           独立于 agent 半边 —— 放一起会被判成
+│                           「统一包」而默认禁用
 ├── docs/
 │   ├── 开发文档与流程图.html   架构 + 流程图 + 风险清单（PDF 同名）
 │   ├── 设置页-demo.html        设置页独立预览版

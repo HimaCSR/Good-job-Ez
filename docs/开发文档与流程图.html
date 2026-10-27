@@ -994,7 +994,39 @@
   插件体检会把插件复制到临时目录再清理，日志文件在那儿会句柄未关。
 </div>
 
-<h3>13.3 一条命令做完检查</h3>
+<h3>13.3 仓库即运行副本（junction 模式）</h3>
+
+<div class="note">
+  <b>两处都是 junction</b>：<br>
+  <code>&lt;hermes&gt;/plugins/job-radar</code> → 仓库 <code>src/job_radar</code>（agent 半边）<br>
+  <code>&lt;hermes&gt;/desktop-plugins/job-radar</code> → 仓库 <code>src/desktop/job-radar</code>（桌面半边）<br><br>
+  <b>改代码即生效</b>，不用再手工同步副本。实测：仓库里写文件，运行目录立刻可见。
+</div>
+
+<div class="warn">
+  <b>桌面半边为什么不能放在 agent 半边里</b><br><br>
+  Hermes 看到 <code>plugins/&lt;名字&gt;/desktop/plugin.js</code> 就会把它当
+  「统一包的桌面半边」：Electron 复制到 <code>desktop-plugins/</code> 并盖上
+  <code>.hermes-package.json</code>，渲染进程看到 marker 就判定为
+  <code>defaultEnabled: false</code> —— 插件默认禁用，<b>必须用户去
+  Settings ▸ Plugins 手动启用一次</b>。<br><br>
+  试过几条路都走不通：<br>
+  · 删 marker —— Electron 每轮 reconcile 都重新写回去<br>
+  · 写不带 <code>package</code> 的 marker —— 渲染进程不认，但 Electron 的
+  <code>readMarker</code> 要求 <code>package &amp;&amp; source</code>，读不到就每轮重写<br>
+  · 改 Electron 的 LevelDB 写 <code>pluginDecisions</code> —— 太脆<br><br>
+  <b>可行解</b>：把桌面半边从 agent 半边里搬出去（<code>src/desktop/job-radar/</code>）。
+  agent 半边没有 <code>desktop/</code> → Electron 不 materialize → 不写 marker →
+  桌面端以独立插件形态加载 → <b>默认启用</b>。
+</div>
+
+<div class="note">
+  <b>备份不能放在 <code>plugins/</code> 里</b> —— 桌面端会扫那儿的每个目录，
+  残留的 <code>job-radar.bak-*</code> 会触发 <code>duplicate id</code> 加载失败。
+  现在备份统一放 <code>&lt;hermes&gt;/plugin-backups/</code>。
+</div>
+
+<h3>13.4 一条命令做完检查</h3>
 <table>
   <tr><th style="width:26%">命令</th><th>做什么</th></tr>
   <tr><td><code>dev.sh test</code></td>
@@ -1009,7 +1041,7 @@
       <td>看运行日志</td></tr>
 </table>
 
-<h3>13.4 脱敏扫描（发布前必过）</h3>
+<h3>13.5 脱敏扫描（发布前必过）</h3>
 <div class="warn">
   <b>仓库里不得出现</b>：真实姓名、手机号、邮箱、本机绝对路径、真实公司名、
   cookie 值、真实简历原文。<br>
@@ -1018,7 +1050,7 @@
   但那些文件里的值必须是假的。
 </div>
 
-<h3>13.5 CI 不需要装 Hermes</h3>
+<h3>13.6 CI 不需要装 Hermes</h3>
 <div class="note">
   核心模块（<code>matcher</code> / <code>push</code> / <code>login_check</code> /
   <code>logging_setup</code> / <code>storage</code> / <code>report</code>）

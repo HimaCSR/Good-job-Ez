@@ -82,7 +82,7 @@ python -m unittest discover -s tests
 scripts/dev.sh test
 ```
 
-**测试基线：64 个用例全过。** 提交前必须全绿。
+**测试基线：100 个用例全过。** 提交前必须全绿。
 
 测试分三类，都不需要网络和浏览器：
 

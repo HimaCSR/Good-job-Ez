@@ -102,7 +102,7 @@
 
 | 项 | 状态 |
 | --- | --- |
-| 单元测试（64 个） | ✅ |
+| 单元测试（100 个） | ✅ |
 | 运行日志 + 凭证打码 | ✅ |
 | CHANGELOG / CONTRIBUTING / ROADMAP | ✅ |
 | GitHub Actions CI | 🔄 计划中 |
