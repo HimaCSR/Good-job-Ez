@@ -43,7 +43,7 @@ function Field({ label, hint, children, wide }) {
 
 function Panel({ title, hint, actions, children, bodyClass }) {
   return jsxs('div', {
-    className: 'flex flex-col overflow-hidden rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-card)',
+    className: 'flex flex-col overflow-hidden rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-primary)',
     children: [
       jsxs('div', {
         className: 'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-4 py-2.5',
@@ -205,8 +205,8 @@ function PhotoUpload({ ctx }) {
       title: photo ? '点击删除' : '点击上传',
       className: cn(
         'flex h-24 w-16 shrink-0 flex-col items-center justify-center overflow-hidden',
-        'rounded-md border border-dashed border-(--ui-stroke-strong) text-[0.625rem] text-(--ui-text-tertiary)',
-        photo ? 'border-solid' : 'hover:border-(--ui-stroke-focus)'
+        'rounded-md border border-dashed border-(--ui-stroke-primary) text-[0.625rem] text-(--ui-text-tertiary)',
+        photo ? 'border-solid' : 'hover:border-(--ui-stroke-secondary)'
       ),
       children: photo
         ? jsx('img', { src: photo, alt: '证件照', className: 'h-full w-full object-cover' })
@@ -326,7 +326,7 @@ function ExperienceEditor({ ctx }) {
   const addBtn = jsx('button', {
     type: 'button',
     onClick: () => setEditing({ id: '', company: '', title: '', start: '', end: '', bullets: [''] }),
-    className: 'rounded-md border border-dashed border-(--ui-stroke-strong) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-stroke-focus)',
+    className: 'rounded-md border border-dashed border-(--ui-stroke-primary) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-stroke-secondary)',
     children: '＋ 添加一段经历',
   })
 
@@ -393,7 +393,7 @@ function ExperienceForm({ exp, busy, onCancel, onSave }) {
   }))
 
   return jsxs('div', {
-    className: 'flex flex-col gap-2.5 rounded-lg border border-(--ui-stroke-focus) bg-(--ui-bg-secondary) p-3',
+    className: 'flex flex-col gap-2.5 rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3',
     children: [
       jsxs('div', { className: 'grid grid-cols-2 gap-2', children: [
         jsx(Field, { label: '公司', children: jsx(Input, {
@@ -491,7 +491,7 @@ function ResumeImportPanel({ ctx, onDraft }) {
 
   return jsxs('div', { className: 'flex flex-col gap-3', children: [
     jsx('label', {
-      className: 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-4 py-6 text-center hover:bg-(--ui-bg-tertiary)',
+      className: 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-primary) bg-(--ui-bg-secondary) px-4 py-6 text-center hover:bg-(--ui-bg-tertiary)',
       children: [
         jsx('span', { className: 'text-sm text-(--ui-text-primary)',
           children: file ? file.name : '拖入或点击选择简历文件' }),
@@ -628,7 +628,7 @@ function ProfileView({ ctx, cfg, onSaved }) {
             jsx(Field, {
               label: '最高学历',
               children: jsx('select', {
-                className: 'h-8 w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-input) px-2 text-sm outline-none focus:border-(--ui-accent)',
+                className: 'h-8 w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) px-2 text-sm outline-none focus:border-(--ui-accent)',
                 value: identity.degree || '本科',
                 onChange: (e) => setIdentity('degree', e.target.value),
                 children: ['大专', '本科', '硕士', '博士'].map((deg) =>
@@ -972,7 +972,7 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
       className: cn(
         'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
         picked === r.resume_id
-          ? 'border-(--ui-stroke-focus) bg-(--ui-bg-secondary)'
+          ? 'border-(--ui-stroke-secondary) bg-(--ui-bg-secondary)'
           : 'border-(--ui-stroke-secondary) hover:bg-(--ui-bg-secondary)'
       ),
       children: [main, badge],
@@ -1000,7 +1000,7 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
     : resumeRows.concat([nextBtn])
 
   return jsx('div', {
-    className: cn('fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6'),
+    className: cn('fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6'),
     onClick: onClose,
     children: jsxs('div', {
       className: cn(
@@ -1181,7 +1181,7 @@ function ResumeOptimizeDialog({ job, ctx, onClose }) {
   return jsx('div', {
     className: cn(
       'fixed inset-0 z-50 flex items-center justify-center',
-      'bg-black/40 p-6'
+      'bg-black/55 p-6'
     ),
     onClick: onClose,
     children: jsxs('div', {
@@ -1263,6 +1263,7 @@ function ResumeOptimizeDialog({ job, ctx, onClose }) {
               jsx('label', { className: 'flex items-center gap-1.5 text-[0.6875rem] text-(--ui-text-secondary)', children: [
                 jsx('input', {
                   type: 'checkbox',
+                  style: { accentColor: 'var(--ui-accent)' },
                   checked: showBasis,
                   onChange: (e) => setShowBasis(e.target.checked),
                 }),
@@ -1484,10 +1485,11 @@ function ApplySwitchPanel({ ctx }) {
           }),
           jsx('input', {
             type: 'checkbox',
+            style: { accentColor: 'var(--ui-accent)' },
             checked: on,
             disabled: save.isPending,
             onChange: (e) => save.mutate({ site, enabled: e.target.checked }),
-            className: 'h-3.5 w-3.5 accent-(--ui-accent)',
+            className: 'h-3.5 w-3.5',
           }),
         ],
       })
@@ -1557,7 +1559,7 @@ function LoginPanel({ ctx }) {
   })
 
   const banner = !alive ? jsx('div', {
-    className: 'mb-3 rounded-md border border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
+    className: 'mb-3 rounded-md border border-(--ui-stroke-primary) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
     children: '招聘站浏览器没在跑 —— 点下面的「登录」会自动拉起一个专用浏览器（只在这一个里登录，不碰你日常的 Chrome）',
   }) : null
 
@@ -1580,7 +1582,7 @@ function PlatformView({ ctx, cfg }) {
     children: [
       // 开发模式的横幅 —— 一眼看到现在跑的是真数据还是假数据
       mockOn ? jsx('div', {
-        className: 'mb-3 flex items-center gap-2 rounded-md border border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
+        className: 'mb-3 flex items-center gap-2 rounded-md border border-(--ui-stroke-primary) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
         children: [
           jsx('span', { className: 'font-medium', children: '开发模式' }),
           jsx('span', { className: 'text-(--ui-text-tertiary)',
@@ -1723,10 +1725,11 @@ function PushSettingsPanel({ ctx, cfg }) {
 
   const toggle = (key) => jsx('input', {
     type: 'checkbox',
+    style: { accentColor: 'var(--ui-accent)' },
     checked: settings[key] !== false,
     disabled: save.isPending,
     onChange: (e) => set(key, e.target.checked),
-    className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+    className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
   })
 
   const rounds = settings.rounds_per_day ?? 4
@@ -1741,7 +1744,7 @@ function PushSettingsPanel({ ctx, cfg }) {
       className: cn(
         'rounded-md border px-2.5 py-1 text-[0.6875rem]',
         advOpen
-          ? 'border-(--ui-stroke-strong) bg-(--ui-bg-secondary) text-(--ui-text-primary)'
+          ? 'border-(--ui-stroke-primary) bg-(--ui-bg-secondary) text-(--ui-text-primary)'
           : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'),
       children: advOpen ? '收起' : '高级',
     }),
@@ -1918,6 +1921,16 @@ function SettingsPage({ ctx }) {
     { id: 'report', label: '日报' },
   ]
 
+  // 诊断：app 会把渲染进程的 console 转发到 desktop.log，
+  // 那里能直接看到这份页面渲染到了哪一步、标签栏渲染出来没有。
+  console.log('[job-radar] SettingsPage render', JSON.stringify({
+    isLoading: cfgQ.isLoading,
+    isError: cfgQ.isError,
+    hasData: !!cfg,
+    tab: tab,
+    tabCount: tabs.length,
+  }))
+
   if (cfgQ.isLoading) {
     return jsx('div', {
       className: 'flex h-full items-center justify-center',
@@ -1940,7 +1953,7 @@ function SettingsPage({ ctx }) {
   }[tab]
 
   return jsxs('div', {
-    className: 'mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-6',
+    className: 'mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-6',
     children: [
       jsxs('div', { className: 'flex items-start gap-3', children: [
         jsxs('div', { children: [
@@ -1961,6 +1974,10 @@ function SettingsPage({ ctx }) {
 // 自实现的分段控件 —— SDK 只导出 Tabs/TabsList/TabsTrigger，没有 TabsContent，
 // 自己渲染内容区更省事，也避免引用未导出的组件。
 function Segmented({ tabs, active, onChange }) {
+  console.log('[job-radar] Segmented render', JSON.stringify({
+    tabCount: (tabs || []).length,
+    active: active,
+  }))
   return jsx('div', {
     className: 'inline-flex gap-1 rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-1',
     children: tabs.map((t) => jsx('button', {
@@ -1970,7 +1987,7 @@ function Segmented({ tabs, active, onChange }) {
       className: cn(
         'rounded-md px-3 py-1 text-xs font-medium transition-colors',
         active === t.id
-          ? 'bg-(--ui-bg-card) text-(--ui-text-primary) shadow-sm'
+          ? 'bg-(--ui-bg-primary) text-(--ui-text-primary) shadow-sm'
           : 'text-(--ui-text-tertiary) hover:text-(--ui-text-primary)'
       ),
       children: t.label,
@@ -2031,7 +2048,7 @@ function ResumeView({ ctx, cfg }) {
           className: cn(
             'flex h-6 w-6 items-center justify-center rounded-full border text-xs',
             helpOpen
-              ? 'border-(--ui-stroke-strong) bg-(--ui-bg-secondary)'
+              ? 'border-(--ui-stroke-primary) bg-(--ui-bg-secondary)'
               : 'border-(--ui-stroke-secondary) hover:bg-(--ui-bg-secondary)'
           ),
           title: '上传模板说明',
@@ -2065,7 +2082,7 @@ function ResumeView({ ctx, cfg }) {
               key: '__upload',
               type: 'button',
               onClick: () => uploadTplRef.current && uploadTplRef.current.click(),
-              className: 'flex min-h-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-strong) p-4 text-xs text-(--ui-text-tertiary) transition-colors hover:border-(--ui-stroke-focus) hover:text-(--ui-text-secondary)',
+              className: 'flex min-h-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-primary) p-4 text-xs text-(--ui-text-tertiary) transition-colors hover:border-(--ui-stroke-secondary) hover:text-(--ui-text-secondary)',
               children: [
                 jsx('span', { className: 'text-lg', children: '＋' }),
                 jsx('span', { children: converting ? '转换中…' : '上传模板' }),
@@ -2097,10 +2114,11 @@ function ResumeView({ ctx, cfg }) {
           ]}),
           jsx('input', {
             type: 'checkbox',
+            style: { accentColor: 'var(--ui-accent)' },
             checked: settings.smart_template !== false,
             disabled: saveSettings.isPending,
             onChange: (e) => saveSettings.mutate({ ...settings, smart_template: e.target.checked }),
-            className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+            className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
           }),
         ]}),
         jsxs('div', { className: 'flex items-start gap-3', children: [
@@ -2111,13 +2129,14 @@ function ResumeView({ ctx, cfg }) {
           ]}),
           jsx('input', {
             type: 'checkbox',
+            style: { accentColor: 'var(--ui-accent)' },
             checked: Array.isArray(settings.template_allow) && settings.template_allow.length > 0,
             disabled: saveSettings.isPending,
             onChange: (e) => saveSettings.mutate({
               ...settings,
               template_allow: e.target.checked ? picked : [],
             }),
-            className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+            className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
           }),
         ]}),
       ]}),
@@ -2128,7 +2147,7 @@ function ResumeView({ ctx, cfg }) {
       title: '用户简历',
       hint: '投递成功的简历会自动存进这里并打标签',
       children: resumes.length
-        ? jsxs('div', { className: 'flex flex-col divide-y divide-(--ui-stroke-secondary)', children:
+        ? jsxs('div', { className: 'flex flex-col divide-y divide-y [&>*+*]:border-t [&>*+*]:border-(--ui-stroke-primary)', children:
             resumes.map((r) => jsx(ResumeRow, { key: r.resume_id, resume: r }))
           })
         : jsx(EmptyState, {
@@ -2148,8 +2167,8 @@ function TemplateCard({ tpl, active, onToggle }) {
     className: cn(
       'flex flex-col overflow-hidden rounded-lg border text-left transition-colors',
       active
-        ? 'border-(--ui-stroke-focus) ring-1 ring-(--ui-stroke-focus)'
-        : 'border-(--ui-stroke-secondary) hover:border-(--ui-stroke-strong)'
+        ? 'border-(--ui-stroke-secondary) ring-1 ring-(--ui-stroke-secondary)'
+        : 'border-(--ui-stroke-secondary) hover:border-(--ui-stroke-primary)'
     ),
     children: [
       jsx('div', {
@@ -2160,13 +2179,13 @@ function TemplateCard({ tpl, active, onToggle }) {
         children: [
           builtin
             ? jsx('div', {
-                className: 'w-16 rounded-sm border border-(--ui-stroke-secondary) bg-(--ui-bg-card) p-1.5',
+                className: 'w-16 rounded-sm border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) p-1.5',
                 children: [
-                  jsx('div', { className: 'h-1.5 w-8 rounded-sm bg-(--ui-text-primary) opacity-70' }),
-                  jsx('div', { className: 'mt-1 h-1 w-full rounded-sm bg-(--ui-stroke-strong)' }),
-                  jsx('div', { className: 'mt-0.5 h-1 w-3/4 rounded-sm bg-(--ui-stroke-strong)' }),
-                  jsx('div', { className: 'mt-1.5 h-1 w-full rounded-sm bg-(--ui-stroke-strong)' }),
-                  jsx('div', { className: 'mt-0.5 h-1 w-2/3 rounded-sm bg-(--ui-stroke-strong)' }),
+                  jsx('div', { className: 'h-1.5 w-8 rounded-sm bg-(--ui-bg-primary) opacity-70' }),
+                  jsx('div', { className: 'mt-1 h-1 w-full rounded-sm bg-(--ui-stroke-secondary)' }),
+                  jsx('div', { className: 'mt-0.5 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
+                  jsx('div', { className: 'mt-1.5 h-1 w-full rounded-sm bg-(--ui-stroke-secondary)' }),
+                  jsx('div', { className: 'mt-0.5 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
                 ],
               })
             : jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.format.toUpperCase() }),
@@ -2175,7 +2194,7 @@ function TemplateCard({ tpl, active, onToggle }) {
               'absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[0.625rem]',
               active
                 ? 'bg-(--ui-accent) text-white'
-                : 'border border-(--ui-stroke-secondary) bg-(--ui-bg-card) text-transparent'
+                : 'border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) text-transparent'
             ),
             children: '✓',
           }),
@@ -2192,9 +2211,10 @@ function TemplateCard({ tpl, active, onToggle }) {
 /** 一份简历档案。 */
 function ResumeRow({ resume }) {
   const tags = (resume.tags || []).filter(Boolean)
-  return jsxs('div', { className: 'flex items-center gap-3 py-2.5', children: [
+  // 分隔线自己画 —— 容器上的 `divide-(--ui-*)` 任意值类在 app 的 CSS 里不存在
+  return jsxs('div', { className: 'flex items-center gap-3 border-t border-(--ui-stroke-secondary) py-2.5', children: [
     jsxs('div', {
-      className: 'flex h-16 w-12 flex-none items-center justify-center rounded border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) text-[0.5625rem] text-(--ui-text-tertiary)',
+      className: 'flex h-10 w-12 shrink-0 items-center justify-center rounded border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) text-[0.5625rem] text-(--ui-text-tertiary)',
       children: (resume.format || 'pdf').toUpperCase(),
     }),
     jsxs('div', { className: 'min-w-0 flex-1', children: [
@@ -2271,7 +2291,7 @@ export default {
  * 想切别的得退回主页面 —— 跟 demo 的单页长滚动不一致。
  * 现在子页也有标签栏，切视图不用退回。
  *
- * 宽度跟主页面一致（max-w-5xl），否则两处排版不一样。
+ * 宽度跟主页面一致（max-w-3xl），否则两处排版不一样。
  */
 function SubPage({ ctx, view }) {
   const cfgQ = useConfig(ctx)
@@ -2295,7 +2315,7 @@ function SubPage({ ctx, view }) {
     return jsx('div', { className: 'flex h-full items-center justify-center p-6', children: jsx(ErrorState, { message: String(cfgQ.error) }) })
   }
   return jsx('div', {
-    className: 'mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-6',
+    className: 'mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-6',
     children: [
       jsx('div', { className: 'flex justify-end', children:
         jsx(Segmented, { tabs, active: tab, onChange: setTab }),

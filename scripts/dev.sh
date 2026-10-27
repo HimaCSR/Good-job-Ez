@@ -55,22 +55,76 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/4 单元测试 ==="
+    say "=== 1/5 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/4 桌面端 JS 语法 ==="
+    say "=== 2/5 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/4 脱敏扫描 ==="
+    say "=== 3/5 桌面端 CSS 类存在性 ==="
+    cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
+
+    say ""
+    say "=== 4/5 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 4/4 仓库卫生 ==="
+    say "=== 5/5 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
 
     ok "全部检查通过"
+}
+
+# 桌面端 plugin.js 用的 Tailwind 类，**必须在 app 的 CSS 里真的存在**。
+#
+# **为什么**：Hermes 桌面 app 的 CSS 是 Tailwind JIT 生成的，
+# 只包含 app 自己源码里出现过的类。插件是磁盘上未编译的 ESM，
+# 它的 className 不在 Tailwind 的扫描范围里 ——
+# 写一个 app 没用过的类（比如 max-w-5xl），
+# **那个类在 app CSS 里根本不存在** → 样式静默失效，
+# 不报错、不警告，只是「看起来不对」。
+#
+# app.css 在 Hermes 安装目录里，路径随版本变（index-<hash>.css），
+# 所以用 glob 找最新的那个。找不到就跳过（别的机器上没装 app）。
+cmd_check_desktop_css() {
+    local node_bin="$PLUGIN_DIR/desktop/plugin.js"
+    local checker="$SCRIPT_DIR/check-desktop-css.mjs"
+    [ -f "$node_bin" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+    [ -f "$checker" ] || { warn "找不到 check-desktop-css.mjs，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过桌面端 CSS 检查"
+        return 0
+    fi
+
+    # 找 app 的 CSS：apps/desktop/release/win-unpacked/resources/
+    #                app.asar.unpacked/dist/assets/index-*.css
+    local app_css=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        app_css="$(ls -t "$LOCALAPPDATA"/hermes/hermes-agent/apps/desktop/release/win-unpacked/resources/app.asar.unpacked/dist/assets/index-*.css 2>/dev/null | head -1)"
+    fi
+    if [ -z "$app_css" ] || [ ! -f "$app_css" ]; then
+        warn "找不到 Hermes 桌面端的 CSS，跳过（CI 上没有 app 安装）"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$node_bin"
+    local css_arg="$app_css"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$node_bin")"
+        css_arg="$(cygpath -w "$app_css")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" "$css_arg" || return 1
 }
 
 # 桌面端 plugin.js 是**纯 ESM 未编译**的，改坏了不会报错，只是不渲染。
