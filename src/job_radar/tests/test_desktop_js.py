@@ -180,6 +180,176 @@ class TestNoHardcodedColors(unittest.TestCase):
         self.assertIn("--ui-", src, "应该用 --ui-* 主题变量")
 
 
+class TestNoUndefinedIdentifiers(unittest.TestCase):
+    """**不许引用未定义的标识符** —— 渲染时直接 ReferenceError 崩掉。
+
+    SDK 文档里点名的坑：
+    > A `jsx` element renders nothing / throws `ReferenceError`.
+    > An identifier used in a `jsx()` call isn't imported.
+
+    本机踩过：`ResumeView` 里用了 `uploadTplRef` / `converting` /
+    `onPickTemplate`，**三个都没定义**（代码从 demo 转过来时抄漏了）。
+    切到「用户简历」标签就崩 —— 整个页面被错误边界接管，
+    日志里只有一行 `ReferenceError: converting is not defined`。
+
+    ## 检查方式（**文件级**）
+
+    收集整个文件里**所有被定义过的名字**：
+    - `const/let/var X` / `function X`
+    - 解构出来的名字（`const { a, b } = ...`）
+    - 函数参数
+    - import 进来的名字
+
+    然后收集所有**被引用**的名字，减去上面那批。
+    剩下的，如果又不是 JS 内置/SDK 导出 → 就是未定义。
+
+    **为什么用文件级而不是函数级**：函数级需要精确的作用域分析，
+    而这个文件是 JSX 编译产物（`jsx(...)` 调用而非 JSX 语法），
+    函数级的边界很容易切错（切错就会误报或漏报）。
+    文件级会漏掉「跨函数误用」，但那种情况极罕见。
+
+    **字符串字面量要先剥掉** —— 否则 'AI' / 'PDF' 这种内容
+    会被当成变量引用。
+    """
+
+    # SDK 导出的 + JS 内置 + 本文件里定义的全局 helper
+    GLOBALS = {
+        # SDK
+        "Button", "Input", "Textarea", "Badge", "GlyphSpinner",
+        "EmptyState", "ErrorState", "cn", "host", "useQuery", "useMutation",
+        "useQueryClient", "SIDEBAR_NAV_AREA", "ROUTES_AREA", "PANES_AREA",
+        "TITLEBAR_AREAS", "STATUSBAR_AREAS",
+        # 本文件的 helper（在别的函数里定义）
+        "Segmented", "Panel", "Field", "ChipEditor", "TemplateCard",
+        "ResumeRow", "JobCard", "ApplyResumeDialog", "ResumeOptimizeDialog",
+        "ExperienceEditor", "ExperienceForm", "PhotoUpload", "LoginPanel",
+        "ApplySwitchPanel", "PushSettingsPanel", "ResumeImportPanel",
+        "ProfileView", "RecommendView", "ResumeView", "PlatformView",
+        "ReportView", "SettingsView", "FilterFields", "SettingsPage",
+        "SubPage", "ViewBody", "useConfig", "useJobs", "useRuns", "useLogin",
+        "useMock", "useLogs", "useApplySwitches", "SITE_META",
+        "APPLY_SITE_META", "BROWSER_LOGIN_SITES", "VIEWS",
+        # JS 内置
+        "React", "Fragment", "jsx", "jsxs", "console", "JSON", "Object",
+        "Array", "String", "Number", "Boolean", "Math", "Date", "Error",
+        "Promise", "setTimeout", "clearTimeout", "setInterval",
+        "clearInterval", "fetch", "FileReader", "btoa", "atob",
+        "encodeURIComponent", "decodeURIComponent", "Intl", "Map", "Set",
+        "WeakMap", "Symbol", "parseInt", "parseFloat", "isNaN", "undefined",
+        "null", "true", "false", "window", "document", "Blob", "URL",
+        "FormData", "performance", "navigator", "location", "structuredClone",
+        "crypto", "TextEncoder", "TextDecoder", "Uint8Array", "alert",
+        # JS 关键字（不是变量，但正则会把它们扫出来）
+        "var", "let", "const", "function", "return", "if", "else", "for",
+        "while", "do", "switch", "case", "break", "continue", "new",
+        "typeof", "instanceof", "in", "of", "this", "class", "extends",
+        "super", "try", "catch", "finally", "throw", "delete", "void",
+        "yield", "await", "async", "static", "get", "set", "default",
+        "export", "import", "from", "as", "with", "debugger",
+        # 其它内置全局
+        "globalThis", "Infinity", "NaN", "WeakSet", "Reflect", "Proxy",
+        "queueMicrotask", "requestAnimationFrame", "cancelAnimationFrame",
+        # 对象方法名（不是变量引用）
+        "register", "registerSettingsPage", "unregister",
+    }
+
+    def _strip_strings(self, src):
+        """剥掉字符串字面量**和注释**（保留长度，方便按位置取上下文）。
+
+        注释里出现的英文单词（register / switch / try …）如果不清掉，
+        会被当成变量引用 —— 全是噪音。
+        """
+        blank = lambda mm: " " * len(mm.group(0))
+        # 先剥注释（避免注释里的引号打乱字符串配对）
+        out = re.sub(r"//[^\n]*", blank, src)
+        out = re.sub(r"/\*[\s\S]*?\*/", blank, out)
+        # 再剥字符串
+        out = re.sub(r"'(?:[^'\\\n]|\\.)*'", blank, out)
+        out = re.sub(r'"(?:[^"\\\n]|\\.)*"', blank, out)
+        out = re.sub(r"`(?:[^`\\]|\\.)*`", blank, out)
+        return out
+
+    def _defined_names(self, src):
+        names = set()
+        # const / let / var / function 声明
+        for m in re.finditer(
+                r"\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)", src):
+            names.add(m.group(1))
+        # 解构：const { a, b } = ...  /  const [a, b] = ...
+        for m in re.finditer(r"\{([^}]*)\}\s*=", src):
+            for part in m.group(1).split(","):
+                part = part.strip().split(":")[0].split("=")[0].strip()
+                if re.match(r"^[A-Za-z_$][\w$]*$", part):
+                    names.add(part)
+        for m in re.finditer(r"\[([^\]]*)\]\s*=", src):
+            for part in m.group(1).split(","):
+                part = part.strip().split("=")[0].strip()
+                if re.match(r"^[A-Za-z_$][\w$]*$", part):
+                    names.add(part)
+        # 函数参数：function f(a, { b, c }) / const f = (a) =>
+        for m in re.finditer(r"\(([^()]*)\)", src):
+            raw = m.group(1)
+            # 整体去掉一层 {} / []，再按逗号拆 —— 否则第一个 part 会带着
+            # '{'、最后一个带着 '}'，两边都匹配不上名字的正则。
+            raw = raw.strip()
+            if raw.startswith("{") and raw.endswith("}"):
+                raw = raw[1:-1]
+            elif raw.startswith("[") and raw.endswith("]"):
+                raw = raw[1:-1]
+            for part in raw.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                # 去掉默认值和类型标注
+                part = part.split("=")[0].split(":")[0].strip()
+                if not part:
+                    continue
+                if re.match(r"^[A-Za-z_$][\w$]*$", part):
+                    names.add(part)
+                else:
+                    # 嵌套解构 { a: { b } }
+                    for sub in re.findall(r"[A-Za-z_$][\w$]*", part):
+                        names.add(sub)
+        # import 进来的
+        for m in re.finditer(r"import\s*\{([^}]*)\}", src):
+            for part in m.group(1).split(","):
+                part = part.strip().split(" as ")[-1].strip()
+                if re.match(r"^[A-Za-z_$][\w$]*$", part):
+                    names.add(part)
+        return names
+
+    def test_no_undefined_identifiers(self):
+        src = _read()
+        code = self._strip_strings(src)
+        defined = self._defined_names(src)
+        bad = []
+        for m in re.finditer(r"(?<![.\w$])([A-Za-z_$][\w$]*)", code):
+            ident = m.group(1)
+            if ident in defined or ident in self.GLOBALS:
+                continue
+            # 对象键：`{ ref: x }` —— 键后面紧跟 ':'
+            tail = code[m.end():m.end()+3]
+            if re.match(r"^\s*:(?!:)", tail):
+                continue
+            # 赋值目标：`x = ...`
+            if re.match(r"^\s*=(?!=)", tail):
+                continue
+            # 函数调用/属性前的大写词（组件名）—— GLOBALS 已覆盖大部分
+            bad.append((ident, m.start()))
+        if bad:
+            seen = {}
+            for ident, pos in bad:
+                seen.setdefault(ident, pos)
+            msg = "\n".join(
+                "  %s  ——  上下文: %s" % (
+                    ident,
+                    re.sub(r"\s+", " ", code[max(0, pos - 50):pos + 30]))
+                for ident, pos in sorted(seen.items()))
+            self.fail(
+                "这些标识符在整个文件里从没被定义过"
+                "（渲染时会 ReferenceError 崩掉）：\n" + msg)
+
+
 class TestNoRelativeImports(unittest.TestCase):
     """只允许三个 specifier —— app 的加载器只认这三个。"""
 

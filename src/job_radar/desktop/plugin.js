@@ -2036,6 +2036,52 @@ function ResumeView({ ctx, cfg }) {
   const toggle = (id) => setPicked((prev) =>
     prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
 
+  // ── 上传模板 ──
+  //
+  // **转换在本机完成，文件不离开这台电脑**（后端是本地规则解析，不调大模型）。
+  //
+  // `uploadTplRef` / `converting` / `onPickTemplate` 之前是未定义的 ——
+  // 代码从 demo 转过来时抄漏了，切到这个标签就会 ReferenceError 崩掉。
+  const uploadTplRef = React.useRef(null)
+  const [converting, setConverting] = React.useState(false)
+  const [convertMsg, setConvertMsg] = React.useState('')
+
+  const onPickTemplate = async (e) => {
+    const file = e.target.files && e.target.files[0]
+    e.target.value = ''            // 允许重复选同一个文件
+    if (!file) return
+    setConverting(true)
+    setConvertMsg('正在转换 ' + file.name + ' …')
+    try {
+      // 用 FileReader 读 base64 —— 手写 btoa(String.fromCharCode(...))
+      // 在大文件上会爆栈（展开参数过多）。
+      const data_base64 = await new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => {
+          const s = String(fr.result || '')
+          // 去掉 data: URL 前缀
+          resolve(s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s)
+        }
+        fr.onerror = () => reject(new Error('读取文件失败'))
+        fr.readAsDataURL(file)
+      })
+      const r = await ctx.rest('/templates/convert', {
+        method: 'POST',
+        body: { filename: file.name, data_base64 },
+      })
+      if (!r || r.ok === false) {
+        setConvertMsg((r && r.error) || '转换失败')
+        return
+      }
+      setConvertMsg('已加入模板库：' + ((r.template && r.template.name) || file.name))
+      qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
+    } catch (err) {
+      setConvertMsg(String((err && err.message) || err))
+    } finally {
+      setConverting(false)
+    }
+  }
+
   return jsxs('div', { className: 'flex flex-col gap-4', children: [
     // ── 简历模板 ──
     jsx(Panel, {
@@ -2101,6 +2147,11 @@ function ResumeView({ ctx, cfg }) {
       className: 'hidden',
       onChange: onPickTemplate,
     }),
+
+    convertMsg ? jsx('div', {
+      className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+      children: convertMsg,
+    }) : null,
 
     // ── 智能选模板 ──
     jsx(Panel, {
