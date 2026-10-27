@@ -101,3 +101,6 @@ bb-sites/
 *.pem
 secrets.json
 credentials.json
+
+# 桌面插件运行时的 marker（桌面 app 自动写入，不是源码）
+.hermes-package.json

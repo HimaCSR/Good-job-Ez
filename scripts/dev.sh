@@ -3,8 +3,8 @@
 #
 #   ./scripts/dev.sh test           跑单元测试
 #   ./scripts/dev.sh check          提交前检查（测试 + 脱敏 + 仓库卫生）
-#   ./scripts/dev.sh sync-desktop   把桌面端 plugin.js 同步到桌面端副本
-#   ./scripts/dev.sh link           把插件目录换成 junction 指向仓库（需先停网关）
+#   ./scripts/dev.sh sync-desktop   同步桌面端 plugin.js（junction 模式下是 no-op）
+#   ./scripts/dev.sh link           插件目录换成 junction 指向仓库（仓库即真相源）
 #   ./scripts/dev.sh unlink         还原成普通目录
 #   ./scripts/dev.sh logs           看最近的运行日志
 #
@@ -55,10 +55,19 @@ cmd_check() {
 }
 
 # ── sync-desktop ────────────────────────────────────────────────────────
+# junction 模式下桌面端直接读仓库的 desktop/plugin.js —— 不用同步。
 cmd_sync_desktop() {
+    local lt
+    lt="$(powershell -NoProfile -Command \
+        "(Get-Item '$DESKTOP_COPY').LinkType" 2>/dev/null | tr -d '\r')"
+    if [ "$lt" = "Junction" ]; then
+        ok "桌面端是 junction → 仓库即运行副本，不用同步"
+        say "${DIM}改完 desktop/plugin.js 保存即生效${OFF}"
+        return 0
+    fi
     if [ ! -d "$DESKTOP_COPY" ]; then
         warn "桌面端副本目录不存在：$DESKTOP_COPY"
-        warn "（桌面端还没 materialize 过？）先在 Hermes 里 Reload desktop plugins"
+        warn "先跑 dev.sh link，或者在 Hermes 里 Reload desktop plugins"
         return 1
     fi
     cp "$PLUGIN_DIR/desktop/plugin.js" "$DESKTOP_COPY/plugin.js"
@@ -67,38 +76,81 @@ cmd_sync_desktop() {
 }
 
 # ── link / unlink ───────────────────────────────────────────────────────
+#
+# 目的：让**仓库成为唯一真相源** —— 改代码即生效，不用手工同步。
+#
+# 两处都要 junction：
+#   <hermes>/plugins/job-radar        → 仓库 src/job_radar      （agent 半边）
+#   <hermes>/desktop-plugins/job-radar → 仓库 src/job_radar/desktop（桌面半边）
+#
+# 备份**不能放在 plugins/ 里** —— 桌面端会扫 plugins/ 下的每个目录，
+# 一个残留备份就会触发 "duplicate id" 加载失败。
+BACKUP_ROOT="$HERMES_HOME/plugin-backups"
+
 cmd_link() {
     if [ ! -d "$PLUGIN_DIR" ]; then die "仓库里没有 $PLUGIN_DIR"; fi
+    mkdir -p "$BACKUP_ROOT"
 
-    if [ -e "$RUNTIME_PLUGIN" ]; then
-        if [ -d "$RUNTIME_PLUGIN.bak-before-junction" ]; then
-            rm -rf "$RUNTIME_PLUGIN.bak-before-junction"
-        fi
-        say "备份当前插件目录…"
-        cp -r "$RUNTIME_PLUGIN" "$RUNTIME_PLUGIN.bak-before-junction" 2>/dev/null \
-            || warn "备份不完整（可能有文件被占用）"
-        rm -rf "$RUNTIME_PLUGIN" 2>/dev/null \
-            || die "删不掉插件目录 —— 多半是网关还在跑。先停网关：hermes gateway stop"
-    fi
-
-    say "建 junction：$RUNTIME_PLUGIN → $PLUGIN_DIR"
-    if command -v mklink >/dev/null 2>&1; then
-        cmd.exe //c "mklink /J \"$(cygpath -w "$RUNTIME_PLUGIN")\" \"$(cygpath -w "$PLUGIN_DIR")\"" \
-            || die "mklink 失败"
+    # ① agent 半边
+    local lt
+    lt="$(powershell -NoProfile -Command \
+        "(Get-Item '$RUNTIME_PLUGIN').LinkType" 2>/dev/null | tr -d '\r')"
+    if [ "$lt" = "Junction" ]; then
+        ok "agent 半边已是 junction"
     else
-        ln -s "$PLUGIN_DIR" "$RUNTIME_PLUGIN" || die "ln -s 失败"
+        if [ -e "$RUNTIME_PLUGIN" ]; then
+            say "备份当前插件目录 → $BACKUP_ROOT/…"
+            rm -rf "$BACKUP_ROOT/job-radar.bak-pre-junction"
+            cp -r "$RUNTIME_PLUGIN" "$BACKUP_ROOT/job-radar.bak-pre-junction" 2>/dev/null \
+                || warn "备份不完整（可能有文件被占用）"
+            rm -rf "$RUNTIME_PLUGIN" 2>/dev/null \
+                || die "删不掉插件目录 —— 先停网关：hermes gateway stop"
+        fi
+        say "建 junction：plugins/job-radar → 仓库 src/job_radar"
+        powershell -NoProfile -Command \
+            "cmd /c mklink /J '$RUNTIME_PLUGIN' '$PLUGIN_DIR'" >/dev/null 2>&1 \
+            || die "agent 半边 mklink 失败"
+        ok "agent 半边已建 junction"
     fi
-    ok "已建链接。重启网关后生效：hermes gateway restart"
+
+    # ② 桌面半边
+    local dlt
+    dlt="$(powershell -NoProfile -Command \
+        "(Get-Item '$DESKTOP_COPY').LinkType" 2>/dev/null | tr -d '\r')"
+    if [ "$dlt" = "Junction" ]; then
+        ok "桌面半边已是 junction"
+    else
+        if [ -e "$DESKTOP_COPY" ]; then
+            rm -rf "$DESKTOP_COPY" 2>/dev/null || warn "删不掉桌面端副本目录"
+        fi
+        powershell -NoProfile -Command \
+            "cmd /c mklink /J '$DESKTOP_COPY' '$PLUGIN_DIR/desktop'" >/dev/null 2>&1 \
+            || die "桌面半边 mklink 失败"
+        ok "桌面半边已建 junction"
+    fi
+
+    say ""
+    ok "仓库现在是唯一真相源 —— 改代码即生效"
+    say "${DIM}桌面端需要重启 Hermes 桌面 app（或 Plugins → Rescan）才会重新加载${OFF}"
+    say "${DIM}网关侧建议重启一次：hermes gateway restart${OFF}"
 }
 
 cmd_unlink() {
-    if [ ! -d "$RUNTIME_PLUGIN.bak-before-junction" ]; then
-        die "没有备份可还原：$RUNTIME_PLUGIN.bak-before-junction"
+    local backup="$BACKUP_ROOT/job-radar.bak-pre-junction"
+    [ -d "$backup" ] || die "没有备份可还原：$backup"
+
+    # 拆 junction（不是删内容）
+    [ -e "$RUNTIME_PLUGIN" ] && rm -rf "$RUNTIME_PLUGIN" 2>/dev/null
+    cp -r "$backup" "$RUNTIME_PLUGIN"
+    ok "agent 半边已还原成普通目录"
+
+    if [ -e "$DESKTOP_COPY" ]; then
+        rm -rf "$DESKTOP_COPY" 2>/dev/null
+        mkdir -p "$DESKTOP_COPY"
+        [ -f "$PLUGIN_DIR/desktop/plugin.js" ] \
+            && cp "$PLUGIN_DIR/desktop/plugin.js" "$DESKTOP_COPY/plugin.js"
+        ok "桌面半边已还原成普通目录"
     fi
-    rm -rf "$RUNTIME_PLUGIN" 2>/dev/null \
-        || die "删不掉插件目录 —— 先停网关"
-    cp -r "$RUNTIME_PLUGIN.bak-before-junction" "$RUNTIME_PLUGIN"
-    ok "已还原成普通目录"
 }
 
 # ── logs ────────────────────────────────────────────────────────────────
@@ -127,7 +179,7 @@ case "${1:-help}" in
         say "  test           跑单元测试"
         say "  check          提交前检查（测试 + 脱敏 + 仓库卫生）"
         say "  sync-desktop   同步桌面端 plugin.js"
-        say "  link           插件目录换成 junction 指向仓库（需先停网关）"
+        say "  link           插件目录换成 junction 指向仓库"
         say "  unlink         还原成普通目录"
         say "  logs [N|-f]    看运行日志"
         ;;

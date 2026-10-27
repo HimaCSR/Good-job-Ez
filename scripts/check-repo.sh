@@ -83,6 +83,19 @@ else
     RUNTIME="$HOME/.hermes/plugins/job-radar"
 fi
 if [ -d "$RUNTIME" ]; then
+    # junction 模式：运行目录**就是**仓库 src/job_radar（同一份文件），
+    # 没有副本可对 —— 比对会永远是「一致」，纯噪音。
+    if [ -z "$(readlink "$RUNTIME" 2>/dev/null)" ] && \
+       ! grep -q . /dev/null; then :; fi
+    LINKTYPE="$(powershell -NoProfile -Command \
+        "(Get-Item '$RUNTIME').LinkType" 2>/dev/null | tr -d '\r')"
+    if [ "$LINKTYPE" = "Junction" ]; then
+        ok "运行目录是 junction → 仓库即运行副本（无需同步）"
+        RUNTIME=""
+    fi
+fi
+
+if [ -n "$RUNTIME" ] && [ -d "$RUNTIME" ]; then
     DRIFT=0
     CHECKED=0
     while IFS= read -r rel; do
@@ -98,7 +111,7 @@ if [ -d "$RUNTIME" ]; then
                 -not -path './__pycache__/*' -not -path './tests/__pycache__/*' \
                 | sed 's|^\./||' | sort)
     [ "$DRIFT" -eq 0 ] && ok "运行副本与仓库一致（$CHECKED 个文件）"
-else
+elif [ -n "$RUNTIME" ]; then
     warn "找不到运行副本（$RUNTIME）"
 fi
 
