@@ -1921,9 +1921,9 @@ function SettingsPage({ ctx }) {
     { id: 'report', label: '日报' },
   ]
 
-  // 诊断：app 会把渲染进程的 console 转发到 desktop.log，
-  // 那里能直接看到这份页面渲染到了哪一步、标签栏渲染出来没有。
-  console.log('[job-radar] SettingsPage render', JSON.stringify({
+  // 诊断：app 只把 console.error 转发到 desktop.log（console.log 不转发），
+  // 所以这里用 error 级输出 —— 那里能直接看到这份页面渲染到了哪一步。
+  console.error('[job-radar] SettingsPage render', JSON.stringify({
     isLoading: cfgQ.isLoading,
     isError: cfgQ.isError,
     hasData: !!cfg,
