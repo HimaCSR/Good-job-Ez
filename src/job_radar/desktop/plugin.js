@@ -342,7 +342,7 @@ function ExperienceEditor({ ctx }) {
       className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) px-2.5 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
       children: '开发模式：下面显示的是 mock 数据',
     }) : null,
-    rows.length ? jsxs('div', {}, rows) : null,
+    rows.length ? jsxs('div', { children: rows }) : null,
     rows.length ? null : jsx('div', {
       className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
       children: '还没有结构化的经历。简历里的「工作经历」章节要靠它 —— 有公司名和时间才完整。',
@@ -1329,7 +1329,8 @@ function RecommendView({ ctx, cfg }) {
           children: advOpen ? '收起' : '高级',
         }),
         bodyClass: 'p-0',
-        children: jsxs('div', {}, [
+        // children 必须放在 props 里 —— jsx(type, props, key) 的第三个参数是 key
+        children: jsxs('div', { children: [
           advOpen && jsxs('div', {
             className: 'border-b border-(--ui-stroke-secondary) px-4 py-3',
             children: [
@@ -1344,8 +1345,8 @@ function RecommendView({ ctx, cfg }) {
               ? jsx(ErrorState, { message: String(jobsQ.error) })
               : jobs.length === 0
                 ? jsx(EmptyState, { title: '还没有岗位', description: '跑一次抓取就会出现' })
-                : jsxs('div', {}, jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx }))),
-        ]),
+                : jsxs('div', { children: jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx })) }),
+        ] }),
       }),
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
@@ -1962,8 +1963,14 @@ function SettingsPage({ ctx }) {
         ]}),
         // 标签栏独占一行 —— 放在标题右侧时会被页面上沿裁掉，
         // 而且一行放不下 5 个标签。
-        jsx('div', { className: 'flex flex-wrap items-center gap-2' },
-          jsx(Segmented, { tabs, active: tab, onChange: setTab })),
+        // **children 必须写在 props 里** ——
+        // jsx(type, props, key) 的第三个参数是 key，不是 children！
+        // 写成 jsx('div', {...}, child) 会把 child 当成 key，
+        // 结果 div 根本没有 children → 标签栏**根本不渲染**。
+        jsx('div', {
+          className: 'flex flex-wrap items-center gap-2',
+          children: jsx(Segmented, { tabs, active: tab, onChange: setTab }),
+        }),
       ]}),
       body,
     ],

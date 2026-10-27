@@ -63,15 +63,19 @@ cmd_check() {
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/5 桌面端 CSS 类存在性 ==="
+    say "=== 3/6 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/5 脱敏扫描 ==="
+    say "=== 4/6 桌面端 jsx children 位置 ==="
+    cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
+
+    say ""
+    say "=== 5/6 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 5/5 仓库卫生 ==="
+    say "=== 6/6 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
 
     ok "全部检查通过"
@@ -88,6 +92,36 @@ cmd_check() {
 #
 # app.css 在 Hermes 安装目录里，路径随版本变（index-<hash>.css），
 # 所以用 glob 找最新的那个。找不到就跳过（别的机器上没装 app）。
+# 桌面端 jsx 的 children **必须写在 props 里** ——
+# jsx(type, props, key) 的第三个参数是 key，不是 children。
+# 写成 jsx('div', {...}, child) → child 变成 key → div 没有 children
+# → **那段 UI 根本不渲染，而且不报错**。
+cmd_check_jsx_children() {
+    local checker="$SCRIPT_DIR/check-jsx-children.mjs"
+    local target="$PLUGIN_DIR/desktop/plugin.js"
+    [ -f "$checker" ] || { warn "找不到 check-jsx-children.mjs，跳过"; return 0; }
+    [ -f "$target" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过桌面端 jsx 检查"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$target"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$target")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
+}
+
 cmd_check_desktop_css() {
     local node_bin="$PLUGIN_DIR/desktop/plugin.js"
     local checker="$SCRIPT_DIR/check-desktop-css.mjs"
