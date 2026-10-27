@@ -350,6 +350,55 @@ class TestNoUndefinedIdentifiers(unittest.TestCase):
                 "（渲染时会 ReferenceError 崩掉）：\n" + msg)
 
 
+class TestNoNestedScroll(unittest.TestCase):
+    """插件根容器**不许**自己滚动 —— 滚动是 app 的事。
+
+    ## 为什么要查
+
+    app 的容器链路：
+
+        OverlayMain       flex min-h-0 flex-1 flex-col overflow-hidden   (高度确定)
+        └─ section        min-h-0 overflow-hidden
+           └─ div        h-full min-h-0 overflow-y-auto                 ← 真正的滚动容器
+
+    插件根容器如果再写 `h-full overflow-y-auto`，就变成**嵌套滚动**：
+    内层高度被压成外层的高度（flex + h-full），
+    内容超出被内层裁掉，而内层因为内容被 flex 压缩过
+    **scrollHeight == clientHeight → 不出现滚动条** →
+    面板内容彻底消失，用户完全看不到，也没法滚过去。
+
+    实测（用 app 的真实 CSS 复现）：
+      修复前  滚动容器 scrollHeight=752 == clientHeight=752（不能滚）
+              插件 root 只有 672px（内容被裁，无滚动条）
+      修复后  滚动容器 scrollHeight=844 > 752（能滚）
+              插件 root 764px（内容完整）
+
+    ## 规则
+
+    插件的**根容器**（SettingsPage / SubPage 这类页面根）
+    不能同时带 `h-full` 和 `overflow-y-auto`。
+    """
+
+    def test_page_roots_do_not_scroll(self):
+        src = _read()
+        # 找出所有「页面根容器」的 className —— 带 max-w-3xl 的那种
+        bad = []
+        for m in re.finditer(r"className:\s*'([^']*max-w-3xl[^']*)'", src):
+            cls = m.group(1)
+            has_h_full = 'h-full' in cls.split()
+            has_scroll = 'overflow-y-auto' in cls.split() or 'overflow-auto' in cls.split()
+            if has_h_full and has_scroll:
+                line = src[:m.start()].count('\n') + 1
+                bad.append((line, cls))
+        if bad:
+            msg = "\n".join("  第 %d 行: %s" % (ln, c) for ln, c in bad)
+            self.fail(
+                "页面根容器不要同时设 h-full 和 overflow-y-auto ——\n"
+                "app 的 SettingsContent 已经是滚动容器，"
+                "再套一层会变成嵌套滚动，内容被裁且没有滚动条。\n"
+                + msg)
+
+
 class TestNoRelativeImports(unittest.TestCase):
     """只允许三个 specifier —— app 的加载器只认这三个。"""
 

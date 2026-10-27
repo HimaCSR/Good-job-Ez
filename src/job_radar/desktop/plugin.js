@@ -292,7 +292,7 @@ function ExperienceEditor({ ctx }) {
       children: [
         jsxs('div', { className: 'min-w-0 flex-1', children: [
           jsx('div', { className: 'text-xs font-medium', children: (e.company || '') + (e.title ? ' · ' + e.title : '') }),
-          jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: period }),
+          jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: period }),
           jsxs('div', { className: 'mt-1 flex flex-col gap-0.5', children:
             (e.bullets || []).map((b, i) => jsx('div', {
               key: i,
@@ -386,7 +386,7 @@ function ExperienceForm({ exp, busy, onCancel, onSave }) {
       jsx('button', {
         type: 'button',
         onClick: () => delBullet(i),
-        className: 'mt-0.5 rounded px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary)',
+        className: 'mt-1 rounded px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary)',
         children: '×',
       }),
     ],
@@ -772,7 +772,7 @@ function JobCard({ job, ctx }) {
           }),
           jsxs('div', { className: 'min-w-0 flex-1', children: [
             jsx('div', { className: 'text-sm font-medium', children: job.title || '' }),
-            jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)', children: job.company || '' }),
+            jsx('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)', children: job.company || '' }),
             jsxs('div', {
               className: 'mt-1.5 flex flex-wrap gap-2 text-xs text-(--ui-text-secondary)',
               children: [
@@ -957,7 +957,7 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
       className: 'min-w-0 flex-1',
       children: [
         jsx('div', { className: 'truncate text-xs font-medium', children: r.title || '' }),
-        jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: (r.created || '').slice(0, 10) }),
+        jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: (r.created || '').slice(0, 10) }),
         jsxs('div', { className: 'mt-1.5 flex flex-wrap gap-1', children: tagEls }),
       ],
     })
@@ -1062,7 +1062,7 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
                       className: 'rounded border border-(--ui-stroke-secondary) p-2',
                       children: [
                         jsx('div', { className: 'text-(--ui-text-primary)', children: b.label }),
-                        b.hint ? jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+                        b.hint ? jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)',
                           children: b.hint }) : null,
                       ],
                     }))}),
@@ -1091,9 +1091,9 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
                   className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3 text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
                   children: [
                     jsx('div', { children: '即将投递：' + (chosen ? (chosen.title || chosen.resume_id) : '') }),
-                    jsx('div', { className: 'mt-0.5 text-(--ui-text-tertiary)',
+                    jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)',
                       children: '岗位：' + (job.title || '') }),
-                    jsx('div', { className: 'mt-0.5 text-(--ui-text-tertiary)',
+                    jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)',
                       children: '确认令牌已签发（5 分钟内有效，一次性）' }),
                   ],
                 }),
@@ -1461,7 +1461,7 @@ function ApplySwitchPanel({ ctx }) {
         children: [
           jsxs('div', { className: 'min-w-0 flex-1', children: [
             jsx('div', { className: 'text-sm font-medium', children: meta.label }),
-            jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)',
+            jsx('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)',
               children: on
                 ? '已允许投递 · 每日上限 ' + (info.daily_limit ?? 0) + ' 份'
                 : '未开启投递（默认关闭）' }),
@@ -1542,7 +1542,7 @@ function LoginPanel({ ctx }) {
         }),
         jsxs('div', { className: 'min-w-0 flex-1', children: [
           jsx('div', { className: 'text-sm font-medium', children: meta.label }),
-          jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)',
+          jsx('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)',
             children: on ? '已登录' : '未登录（登录后一直有效，不用反复登）' }),
         ]}),
         jsx('button', {
@@ -1622,9 +1622,9 @@ function PlatformView({ ctx, cfg }) {
                   }),
                   jsxs('div', { className: 'min-w-0 flex-1', children: [
                     jsx('div', { className: 'text-sm font-medium', children: s.label }),
-                    jsx('div', { className: 'mt-0.5 text-xs text-(--ui-text-tertiary)', children: s.detail }),
+                    jsx('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)', children: s.detail }),
                     s.hint ? jsx('div', {
-                      className: 'mt-0.5 text-xs text-(--ui-orange)',
+                      className: 'mt-1 text-xs text-(--ui-orange)',
                       children: s.hint,
                     }) : null,
                   ]}),
@@ -1716,7 +1716,7 @@ function PushSettingsPanel({ ctx, cfg }) {
     children: [
       jsxs('div', { className: 'min-w-0 flex-1', children: [
         jsx('div', { className: 'text-sm font-medium', children: title }),
-        desc ? jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+        desc ? jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
           children: desc }) : null,
       ]}),
       control,
@@ -1729,7 +1729,7 @@ function PushSettingsPanel({ ctx, cfg }) {
     checked: settings[key] !== false,
     disabled: save.isPending,
     onChange: (e) => set(key, e.target.checked),
-    className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
+    className: 'mt-1 h-3.5 w-3.5 shrink-0',
   })
 
   const rounds = settings.rounds_per_day ?? 4
@@ -1921,16 +1921,6 @@ function SettingsPage({ ctx }) {
     { id: 'report', label: '日报' },
   ]
 
-  // 诊断：app 只把 console.error 转发到 desktop.log（console.log 不转发），
-  // 所以这里用 error 级输出 —— 那里能直接看到这份页面渲染到了哪一步。
-  console.error('[job-radar] SettingsPage render', JSON.stringify({
-    isLoading: cfgQ.isLoading,
-    isError: cfgQ.isError,
-    hasData: !!cfg,
-    tab: tab,
-    tabCount: tabs.length,
-  }))
-
   if (cfgQ.isLoading) {
     return jsx('div', {
       className: 'flex h-full items-center justify-center',
@@ -1952,18 +1942,27 @@ function SettingsPage({ ctx }) {
     report: jsx(ReportView, { ctx }),
   }[tab]
 
+  // **不要设 h-full / overflow-y-auto** ——
+  // app 的 SettingsContent 已经是 `h-full min-h-0 overflow-y-auto` 的滚动容器，
+  // 外层 OverlayMain 是 `flex flex-col overflow-hidden`（高度确定）。
+  // 这里再套一层 h-full + overflow-y-auto 会变成**嵌套滚动**：
+  // 内层高度 = 外层高度，内容超出被内层裁掉，而外层因为内容没超出
+  // **不出现滚动条** → 面板内容显示不全。
+  // 根容器只要自然高度，滚动交给 app。
   return jsxs('div', {
-    className: 'mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-6',
+    className: 'mx-auto flex w-full max-w-3xl flex-col gap-4',
     children: [
-      jsxs('div', { className: 'flex items-start gap-3', children: [
+      jsxs('div', { className: 'flex flex-col gap-3', children: [
         jsxs('div', { children: [
           jsx('h1', { className: 'text-lg font-semibold', children: '好岗好找' }),
           jsx('p', {
-            className: 'mt-0.5 text-xs text-(--ui-text-tertiary)',
+            className: 'mt-1 text-xs text-(--ui-text-tertiary)',
             children: '定时抓取招聘网站岗位，按个人画像打分，生成日报并推送到 QQ',
           }),
         ]}),
-        jsx('div', { className: 'ml-auto' },
+        // 标签栏独占一行 —— 放在标题右侧时会被页面上沿裁掉，
+        // 而且一行放不下 5 个标签。
+        jsx('div', { className: 'flex flex-wrap items-center gap-2' },
           jsx(Segmented, { tabs, active: tab, onChange: setTab })),
       ]}),
       body,
@@ -1974,10 +1973,6 @@ function SettingsPage({ ctx }) {
 // 自实现的分段控件 —— SDK 只导出 Tabs/TabsList/TabsTrigger，没有 TabsContent，
 // 自己渲染内容区更省事，也避免引用未导出的组件。
 function Segmented({ tabs, active, onChange }) {
-  console.log('[job-radar] Segmented render', JSON.stringify({
-    tabCount: (tabs || []).length,
-    active: active,
-  }))
   return jsx('div', {
     className: 'inline-flex gap-1 rounded-lg border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-1',
     children: tabs.map((t) => jsx('button', {
@@ -2160,7 +2155,7 @@ function ResumeView({ ctx, cfg }) {
         jsxs('div', { className: 'flex items-start gap-3', children: [
           jsx('div', { className: 'min-w-0 flex-1', children: [
             jsx('div', { className: 'text-sm font-medium', children: '由 Agent 按 JD 自行推荐模板' }),
-            jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
               children: '开启后，生成简历时会先读一遍 JD，再挑最合适的版式：要求简洁就选经典单栏，技能项多就选现代双栏，看重技术深度就选技术极客。你随时能在生成结果里手动换回去。' }),
           ]}),
           jsx('input', {
@@ -2169,13 +2164,13 @@ function ResumeView({ ctx, cfg }) {
             checked: settings.smart_template !== false,
             disabled: saveSettings.isPending,
             onChange: (e) => saveSettings.mutate({ ...settings, smart_template: e.target.checked }),
-            className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
+            className: 'mt-1 h-3.5 w-3.5 shrink-0',
           }),
         ]}),
         jsxs('div', { className: 'flex items-start gap-3', children: [
           jsx('div', { className: 'min-w-0 flex-1', children: [
             jsx('div', { className: 'text-sm font-medium', children: '只在你勾选的模板里挑' }),
-            jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
               children: '勾上后，Agent 只能从上面选中的模板里推荐（可多选）。一个都没勾时，它会在全部模板里自己选。' }),
           ]}),
           jsx('input', {
@@ -2187,7 +2182,7 @@ function ResumeView({ ctx, cfg }) {
               ...settings,
               template_allow: e.target.checked ? picked : [],
             }),
-            className: 'mt-0.5 h-3.5 w-3.5 shrink-0',
+            className: 'mt-1 h-3.5 w-3.5 shrink-0',
           }),
         ]}),
       ]}),
@@ -2234,9 +2229,9 @@ function TemplateCard({ tpl, active, onToggle }) {
                 children: [
                   jsx('div', { className: 'h-1.5 w-8 rounded-sm bg-(--ui-bg-primary) opacity-70' }),
                   jsx('div', { className: 'mt-1 h-1 w-full rounded-sm bg-(--ui-stroke-secondary)' }),
-                  jsx('div', { className: 'mt-0.5 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
+                  jsx('div', { className: 'mt-1 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
                   jsx('div', { className: 'mt-1.5 h-1 w-full rounded-sm bg-(--ui-stroke-secondary)' }),
-                  jsx('div', { className: 'mt-0.5 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
+                  jsx('div', { className: 'mt-1 h-1 rounded-sm bg-(--ui-stroke-secondary)', style: { width: '50%' } }),
                 ],
               })
             : jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.format.toUpperCase() }),
@@ -2253,7 +2248,7 @@ function TemplateCard({ tpl, active, onToggle }) {
       }),
       jsxs('div', { className: 'px-2.5 py-2', children: [
         jsx('div', { className: 'text-xs font-medium', children: tpl.name }),
-        jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.description || '' }),
+        jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.description || '' }),
       ]}),
     ],
   })
@@ -2281,41 +2276,27 @@ function ResumeRow({ resume }) {
   ]})
 }
 
-const VIEWS = [
-  { id: 'profile',   label: '个人信息' },
-  { id: 'recommend', label: '岗位推荐' },
-  { id: 'resume',    label: '用户简历' },
-  { id: 'platform',  label: '平台接入' },
-  { id: 'report',    label: '日报' },
-]
-
-function ViewBody({ ctx, view, cfg }) {
-  switch (view) {
-    case 'recommend': return jsx(RecommendView, { ctx, cfg })
-    case 'resume':    return jsx(ResumeView, { ctx, cfg })
-    case 'platform':  return jsx(PlatformView, { ctx, cfg })
-    case 'report':    return jsx(ReportView, { ctx, cfg })
-    default:          return jsx(ProfileView, { ctx, cfg })
-  }
-}
-
 export default {
   id: ID,
   name: '好岗好找 Good-job-Ez',
   defaultEnabled: true,
   register(ctx) {
     // 1) Settings ▸ Plugins —— 主入口
+    //
+    // **不注册 children** ——
+    // app 会把 `children` 直接渲染成左侧 rail 里的子项
+    // （见 apps/desktop/src/contrib/settings-pages.ts 的 subpagesOf）。
+    // 之前注册了 5 个视图的 children，页面上又画了一套标签栏，
+    // 结果是**两套一样的导航**：左侧 5 个子项 + 顶部 5 个标签。
+    //
+    // 现在只留一个入口 —— 插件主页自带标签栏（SettingsPage），
+    // 左侧不再重复。主页默认落在「个人信息」。
     if (typeof ctx.registerSettingsPage === 'function') {
       ctx.registerSettingsPage({
         id: 'main',
         title: '好岗好找',
         icon: 'search',
         render: () => jsx(SettingsPage, { ctx }),
-        children: VIEWS.map((v) => ({
-          id: v.id,
-          title: v.label,
-          render: () => jsx(SubPage, { ctx, view: v.id }),
-        })),
       })
     }
 
@@ -2336,42 +2317,3 @@ export default {
   },
 }
 
-/** Settings ▸ Plugins 下的子页 —— **带顶部标签栏**。
- *
- * 之前这个子页没有标签栏，用户从 Plugins 页进来只能看一个模块，
- * 想切别的得退回主页面 —— 跟 demo 的单页长滚动不一致。
- * 现在子页也有标签栏，切视图不用退回。
- *
- * 宽度跟主页面一致（max-w-3xl），否则两处排版不一样。
- */
-function SubPage({ ctx, view }) {
-  const cfgQ = useConfig(ctx)
-  const [tab, setTab] = React.useState(view)
-
-  // 视图变了（从别处跳进来）就跟着切
-  React.useEffect(() => { setTab(view) }, [view])
-
-  const tabs = [
-    { id: 'profile', label: '个人信息' },
-    { id: 'recommend', label: '岗位推荐' },
-    { id: 'resume', label: '用户简历' },
-    { id: 'platform', label: '平台接入' },
-    { id: 'report', label: '日报' },
-  ]
-
-  if (cfgQ.isLoading) {
-    return jsx('div', { className: 'flex h-full items-center justify-center', children: jsx(GlyphSpinner, {}) })
-  }
-  if (cfgQ.isError) {
-    return jsx('div', { className: 'flex h-full items-center justify-center p-6', children: jsx(ErrorState, { message: String(cfgQ.error) }) })
-  }
-  return jsx('div', {
-    className: 'mx-auto flex h-full w-full max-w-3xl flex-col gap-4 overflow-y-auto p-6',
-    children: [
-      jsx('div', { className: 'flex justify-end', children:
-        jsx(Segmented, { tabs, active: tab, onChange: setTab }),
-      }),
-      jsx(ViewBody, { ctx, view: tab, cfg: cfgQ.data }),
-    ],
-  })
-}
