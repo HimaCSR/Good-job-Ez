@@ -1021,6 +1021,15 @@
 </div>
 
 <div class="note">
+  <b>新设备上也是默认启用的</b><br><br>
+  Hermes 从 git 安装桌面插件时，<code>detectPluginComponents()</code> 先判断
+  仓库里有没有 agent 半边：有 → 盖 marker → 判定为「统一包」→ opt-in；
+  <b>没有 → 不盖 marker → 独立插件 → 默认启用</b>。<br><br>
+  所以桌面半边单独放一个目录（<code>src/desktop/job-radar/</code>），
+  新设备上装出来就是开着的，不用手动去设置里点一次。
+</div>
+
+<div class="note">
   <b>备份不能放在 <code>plugins/</code> 里</b> —— 桌面端会扫那儿的每个目录，
   残留的 <code>job-radar.bak-*</code> 会触发 <code>duplicate id</code> 加载失败。
   现在备份统一放 <code>&lt;hermes&gt;/plugin-backups/</code>。

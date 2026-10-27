@@ -47,7 +47,19 @@
 
 ## 安装
 
-### 1. 克隆
+### 0. 一条命令（新设备推荐）
+
+```bash
+git clone https://github.com/HimaCSR/Good-job-Ez.git
+cd Good-job-Ez
+bash scripts/dev.sh install .
+```
+
+它会：agent 半边 + 桌面半边各建一个 junction → 打印后续步骤。
+
+**桌面端装出来就是默认启用**，不需要去 Settings ▸ Plugins 手动开。
+
+### 1. 手动克隆
 
 ```bash
 git clone https://github.com/<你的账号>/Good-job-Ez.git
