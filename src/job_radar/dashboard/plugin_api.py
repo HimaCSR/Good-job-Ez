@@ -44,6 +44,7 @@ _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
+    "mock_provider",
 )
 
 
@@ -773,3 +774,184 @@ def delete_photo() -> Dict[str, Any]:
                 except OSError:
                     pass
     return {"ok": True}
+
+
+# ── Mock 层 ─────────────────────────────────────────────────────────────────
+#
+# 给三个还没实现的功能提供假数据，**接口形状跟真实现一致**。
+# 前端对着 mock 开发，真实现写完后把 JOB_RADAR_MOCK 关掉即可，
+# 调用方一行不用改。
+#
+#   GET  /mock/status          mock 模式状态
+#   POST /mock/reset           重置 mock 状态
+#
+#   ① 投递三道门
+#   GET  /apply/gate?job_id=       闸门体检（能不能投、卡在哪）
+#   POST /apply/token              签发一次性确认令牌
+#   POST /apply/submit             执行投递（过三道门）
+#
+#   ② 经历结构化
+#   GET    /experiences            经历列表
+#   POST   /experiences            新增/更新一条
+#   DELETE /experiences/{exp_id}   删一条
+#
+#   ③ 模板转换
+#   POST /templates/convert        上传文件 → 转换 → 加入模板库
+
+
+def _mock():
+    return _sibling("mock_provider")
+
+
+@router.get("/mock/status")
+def mock_status() -> Dict[str, Any]:
+    """mock 模式当前状态。"""
+    try:
+        return {"ok": True, "mock": _mock().status()}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.post("/mock/reset")
+def mock_reset() -> Dict[str, Any]:
+    """把 mock 状态清回初始。"""
+    try:
+        return _mock().reset()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ── ① 投递三道门 ────────────────────────────────────────────────────────────
+
+@router.get("/apply/gate")
+def apply_gate(job_id: str, resume_id: str = "") -> Dict[str, Any]:
+    """投递前的闸门体检。
+
+    返回能不能投、卡在哪一道门。**只是体检，不投。**
+    """
+    storage = _sibling("storage")
+    mock = _mock()
+    job = storage.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "找不到岗位 %s" % job_id}
+    status = mock.gate_status(job, resume_id or None)
+    status["ok"] = True
+    status["job_id"] = job_id
+    status["job_title"] = job.get("title")
+    return status
+
+
+@router.post("/apply/token")
+def apply_token(body: Dict[str, Any]) -> Dict[str, Any]:
+    """签发一次性确认令牌（5 分钟有效，绑定 job_id）。"""
+    mock = _mock()
+    job_id = (body.get("job_id") or "").strip()
+    if not job_id:
+        return {"ok": False, "error": "需要 job_id"}
+    try:
+        token = mock.issue_token(job_id, body.get("site") or "zhaopin",
+                                 body.get("resume_id") or None)
+    except PermissionError as exc:
+        return {"ok": False, "stage": "site_switch", "error": str(exc)}
+    return {"ok": True, "token": token, "expires_in": mock.TOKEN_TTL_SECONDS,
+            "job_id": job_id}
+
+
+@router.post("/apply/submit")
+def apply_submit(body: Dict[str, Any]) -> Dict[str, Any]:
+    """执行投递 —— 过三道门。
+
+    真实现：调招聘站投递接口 + 归档简历 + 打标签。
+    mock：只记账。
+    """
+    storage = _sibling("storage")
+    mock = _mock()
+    job_id = (body.get("job_id") or "").strip()
+    if not job_id:
+        return {"ok": False, "error": "需要 job_id"}
+    job = storage.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "找不到岗位 %s" % job_id}
+
+    resume = None
+    resume_id = body.get("resume_id")
+    if resume_id:
+        for r in storage.list_resumes(limit=100):
+            if r.get("resume_id") == resume_id:
+                resume = r
+                break
+        if not resume:
+            return {"ok": False, "error": "找不到简历 %s" % resume_id}
+
+    result = mock.mock_apply(job, resume, body.get("token"))
+    if result.get("ok"):
+        log.info("投递（mock）job=%s resume=%s",
+                 job_id, (resume or {}).get("resume_id"))
+    return result
+
+
+# ── ② 经历结构化 ────────────────────────────────────────────────────────────
+
+@router.get("/experiences")
+def list_experiences() -> Dict[str, Any]:
+    """结构化的经历列表（公司 / 起止 / 职位 / 分条）。"""
+    mock = _mock()
+    return {"ok": True, "experiences": mock.experiences(), "mock": mock.enabled()}
+
+
+@router.post("/experiences")
+def save_experience(body: Dict[str, Any]) -> Dict[str, Any]:
+    """新增或更新一条经历。"""
+    mock = _mock()
+    exp = body.get("experience") or {}
+    if not (exp.get("company") or "").strip():
+        return {"ok": False, "error": "缺少公司名"}
+    if not (exp.get("bullets") or []):
+        return {"ok": False, "error": "至少要有一条经历描述"}
+    try:
+        saved = mock.upsert_experience(exp)
+        return {"ok": True, "experience": saved}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.delete("/experiences/{exp_id}")
+def delete_experience(exp_id: str) -> Dict[str, Any]:
+    """删一条经历。"""
+    mock = _mock()
+    ok = mock.delete_experience(exp_id)
+    return {"ok": ok}
+
+
+# ── ③ 模板转换 ──────────────────────────────────────────────────────────────
+
+@router.post("/templates/convert")
+def convert_template(body: Dict[str, Any]) -> Dict[str, Any]:
+    """上传模板文件 → 转成 HTML 模板 → 入库。
+
+    body: {filename, data_base64, kind?}
+    """
+    mock = _mock()
+    filename = body.get("filename") or ""
+    if not filename:
+        return {"ok": False, "error": "缺少文件名"}
+    result = mock.convert_template(filename, body.get("data_base64"),
+                                   body.get("kind"))
+    if not result.get("ok"):
+        return result
+
+    tpl = dict(result["template"])
+    storage = _sibling("storage")
+    try:
+        storage.upsert_template({
+            "template_id": tpl["template_id"],
+            "name": tpl["name"],
+            "description": tpl.get("description", ""),
+            "format": tpl.get("format", "docx"),
+            "source_path": tpl.get("source_path", ""),
+            "preview_path": tpl.get("preview_path", ""),
+            "builtin": 0,
+        })
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "template": tpl, "mock": True}

@@ -272,3 +272,35 @@ scripts/dev.sh unlink
 
 问题、想法、PR 都欢迎：
 <https://github.com/HimaCSR/Good-job-Ez/issues>
+
+## 开发模式（mock）
+
+三个功能还没接真实现，用 mock 数据先把前后端跑通：
+
+| 功能 | mock 提供什么 | 真实现要做的事 |
+| --- | --- | --- |
+| 投递三道门 | 站点开关 / 一次性令牌 / 每日上限的完整判定 | 令牌落库 + 真实投递接口 |
+| 经历结构化 | 两条虚构经历，支持增删改 | 落库 + 接进简历生成 |
+| 模板转换 | 假的版式参数 | 读 .docx/.pdf/图片并抽版式 |
+
+**打开方式**（三个来源，优先级从高到低）：
+
+```bash
+# 1. 环境变量（临时）
+JOB_RADAR_MOCK=1 hermes gateway restart
+
+# 2. 插件配置（推荐，设置页可改，不用重启）
+hermes config set plugins.entries.job-radar.settings.mock true
+
+# 3. 代码里显式指定
+mock_provider.enabled(force=True)
+```
+
+**接口形状跟真实现一致** —— 接真实现时只要把 `mock` 参数关掉，
+前端一行都不用改。
+
+**平台接入页**会显示「开发模式」横幅，一眼看到现在跑的是真数据还是假数据，
+横幅上还有个「重置」按钮（清掉 mock 的投递计数和令牌）。
+
+**测试**：`tests/test_mock_provider.py` 重点验「三道门真的能挡住」——
+如果 mock 层挡不住，换真实现时很容易把闸门做漏。

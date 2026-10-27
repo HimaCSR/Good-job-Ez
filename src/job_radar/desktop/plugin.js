@@ -235,6 +235,217 @@ function PhotoUpload({ ctx }) {
   ] })
 }
 
+/* 结构化经历编辑器。
+ *
+ * 现在 profile.experience_text 是一坨自由文本 —— 简历里「工作经历」章节是空的，
+ * 因为不知道公司名和时间。结构化之后每条经历有：
+ *   公司 / 职位 / 起止 / 分条描述
+ *
+ * 描述只能从用户自己写的内容里来 —— 不给编造的入口。
+ */
+function ExperienceEditor({ ctx }) {
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: ['job-radar', 'experiences'],
+    queryFn: async () => ctx.rest('/experiences'),
+  })
+  const [editing, setEditing] = React.useState(null)
+  const [busy, setBusy] = React.useState(false)
+
+  const items = (q.data && q.data.experiences) || []
+  const isMock = q.data && q.data.mock
+
+  const save = async (exp) => {
+    setBusy(true)
+    try {
+      const r = await ctx.rest('/experiences', { method: 'POST', body: { experience: exp } })
+      if (!r || r.ok === false) {
+        host.notify({ kind: 'error', message: (r && r.error) || '保存失败' })
+        return
+      }
+      qc.invalidateQueries({ queryKey: ['job-radar', 'experiences'] })
+      setEditing(null)
+      host.notify({ kind: 'success', message: '经历已保存' })
+    } catch (e) {
+      host.notify({ kind: 'error', message: String((e && e.message) || e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (id) => {
+    setBusy(true)
+    try {
+      await ctx.rest('/experiences/' + encodeURIComponent(id), { method: 'DELETE' })
+      qc.invalidateQueries({ queryKey: ['job-radar', 'experiences'] })
+    } catch (e) {
+      host.notify({ kind: 'error', message: String((e && e.message) || e) })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const rows = items.map((e) => {
+    const period = (e.start || '') + (e.end ? ' ~ ' + e.end : '')
+    const head = jsxs('div', {
+      className: 'flex items-start gap-3',
+      children: [
+        jsxs('div', { className: 'min-w-0 flex-1', children: [
+          jsx('div', { className: 'text-xs font-medium', children: (e.company || '') + (e.title ? ' · ' + e.title : '') }),
+          jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: period }),
+          jsxs('div', { className: 'mt-1 flex flex-col gap-0.5', children:
+            (e.bullets || []).map((b, i) => jsx('div', {
+              key: i,
+              className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
+              children: '· ' + b,
+            })) }),
+        ]}),
+        jsxs('div', { className: 'flex shrink-0 gap-1', children: [
+          jsx('button', {
+            type: 'button',
+            onClick: () => setEditing(e),
+            className: 'rounded border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
+            children: '编辑',
+          }),
+          jsx('button', {
+            type: 'button',
+            onClick: () => remove(e.id),
+            className: 'rounded border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.625rem] text-(--ui-text-tertiary)',
+            children: '删除',
+          }),
+        ] }),
+      ],
+    })
+    return jsx('div', {
+      key: e.id,
+      className: 'border-b border-(--ui-stroke-secondary) py-2.5 last:border-b-0',
+      children: head,
+    })
+  })
+
+  const addBtn = jsx('button', {
+    type: 'button',
+    onClick: () => setEditing({ id: '', company: '', title: '', start: '', end: '', bullets: [''] }),
+    className: 'rounded-md border border-dashed border-(--ui-stroke-strong) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-stroke-focus)',
+    children: '＋ 添加一段经历',
+  })
+
+  const editor = editing ? jsx(ExperienceForm, {
+    exp: editing,
+    busy,
+    onCancel: () => setEditing(null),
+    onSave: save,
+  }) : null
+
+  return jsxs('div', { className: 'flex flex-col gap-3', children: [
+    isMock ? jsx('div', {
+      className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) px-2.5 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+      children: '开发模式：下面显示的是 mock 数据',
+    }) : null,
+    rows.length ? jsxs('div', {}, rows) : null,
+    rows.length ? null : jsx('div', {
+      className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+      children: '还没有结构化的经历。简历里的「工作经历」章节要靠它 —— 有公司名和时间才完整。',
+    }),
+    addBtn,
+    editor,
+  ] })
+}
+
+/* 一条经历的编辑表单。 */
+function ExperienceForm({ exp, busy, onCancel, onSave }) {
+  const [draft, setDraft] = React.useState(() => ({
+    id: exp.id || '',
+    company: exp.company || '',
+    title: exp.title || '',
+    start: exp.start || '',
+    end: exp.end || '',
+    bullets: (exp.bullets && exp.bullets.length ? exp.bullets : ['']).slice(),
+  }))
+
+  const set = (k, v) => setDraft((s) => ({ ...s, [k]: v }))
+  const setBullet = (i, v) => setDraft((s) => {
+    const b = s.bullets.slice()
+    b[i] = v
+    return { ...s, bullets: b }
+  })
+  const addBullet = () => setDraft((s) => ({ ...s, bullets: s.bullets.concat(['']) }))
+  const delBullet = (i) => setDraft((s) => ({ ...s, bullets: s.bullets.filter((_, j) => j !== i) }))
+
+  const bulletInputs = draft.bullets.map((b, i) => jsx('div', {
+    key: i,
+    className: 'flex items-start gap-1.5',
+    children: [
+      jsx('textarea', {
+        value: b,
+        onChange: (e) => setBullet(i, e.target.value),
+        rows: 2,
+        placeholder: '做过什么，有什么结果（数字最好）',
+        className: 'min-h-14 flex-1 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-primary) px-2 py-1 text-xs text-(--ui-text-primary)',
+      }),
+      jsx('button', {
+        type: 'button',
+        onClick: () => delBullet(i),
+        className: 'mt-0.5 rounded px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary)',
+        children: '×',
+      }),
+    ],
+  }))
+
+  return jsxs('div', {
+    className: 'flex flex-col gap-2.5 rounded-lg border border-(--ui-stroke-focus) bg-(--ui-bg-secondary) p-3',
+    children: [
+      jsxs('div', { className: 'grid grid-cols-2 gap-2', children: [
+        jsx(Field, { label: '公司', children: jsx(Input, {
+          value: draft.company,
+          onChange: (e) => set('company', e.target.value),
+          placeholder: '某科技有限公司',
+        }) }),
+        jsx(Field, { label: '职位', children: jsx(Input, {
+          value: draft.title,
+          onChange: (e) => set('title', e.target.value),
+          placeholder: '高级前端工程师',
+        }) }),
+        jsx(Field, { label: '开始', children: jsx(Input, {
+          value: draft.start,
+          onChange: (e) => set('start', e.target.value),
+          placeholder: '2023-04',
+        }) }),
+        jsx(Field, { label: '结束', children: jsx(Input, {
+          value: draft.end,
+          onChange: (e) => set('end', e.target.value),
+          placeholder: '至今',
+        }) }),
+      ] }),
+      jsxs('div', { className: 'flex flex-col gap-1.5', children:
+        [jsx('div', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: '做过什么' })]
+          .concat(bulletInputs)
+          .concat([jsx('button', {
+            type: 'button',
+            onClick: addBullet,
+            className: 'self-start rounded border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
+            children: '＋ 加一条',
+          })]) }),
+      jsxs('div', { className: 'flex gap-2', children: [
+        jsx('button', {
+          type: 'button',
+          disabled: busy || !draft.company.trim(),
+          onClick: () => onSave(draft),
+          className: cn('rounded-md border border-(--ui-accent) px-2.5 py-1 text-[0.6875rem]',
+            'text-(--ui-text-primary) disabled:opacity-50'),
+          children: busy ? '保存中…' : '保存',
+        }),
+        jsx('button', {
+          type: 'button',
+          onClick: onCancel,
+          className: 'rounded-md border border-(--ui-stroke-secondary) px-2.5 py-1 text-[0.6875rem] text-(--ui-text-secondary)',
+          children: '取消',
+        }),
+      ] }),
+    ],
+  })
+}
+
 function ProfileView({ ctx, cfg, onSaved }) {
   const qc = useQueryClient()
   const profile = (cfg && cfg.profile) || {}
@@ -412,6 +623,12 @@ function ProfileView({ ctx, cfg, onSaved }) {
           ],
         }),
       }),
+      jsx('div', { className: 'h-3' }),
+      jsx(Panel, {
+        title: '结构化经历',
+        hint: '公司 / 职位 / 起止 —— 简历「工作经历」章节靠它',
+        children: jsx(ExperienceEditor, { ctx }),
+      }),
     ],
   })
 }
@@ -510,43 +727,160 @@ function JobCard({ job, ctx }) {
   })
 }
 
-/* 投递简历 —— 历史简历推荐弹层。
+/* 投递简历 —— 三道门 + 历史简历推荐。
  *
- * 规则（用户定的）：
- *   ① 该岗位做过「简历匹配优化」→ 直接用优化后那份投递
- *   ② 没做过 → 弹历史简历列表，按对该岗的匹配度排序，默认选最高分
+ * 流程：
+ *   ① 闸门体检（GET /apply/gate）—— 站点开关 / 每日上限
+ *   ② 选简历（历史简历按匹配分排序，默认最高分）
+ *   ③ 签发一次性令牌（POST /apply/token）
+ *   ④ 确认投递（POST /apply/submit）
  *
- * **投递是最后一步，必须用户明确确认。** 这里只到「选定哪份」，
- * 真正投出去还要再点一次带岗位链接的确认 —— 选定 ≠ 授权。
+ * **每一道门没过就停在那一步**，不往下走。
+ * 选定简历 ≠ 授权投递 —— 最后还要再点一次带岗位链接的确认。
  */
 function ApplyResumeDialog({ job, ctx, onClose }) {
-  const [state, setState] = React.useState({ phase: 'loading' })
+  const [phase, setPhase] = React.useState('gate')   // gate | pick | confirm | done
+  const [gate, setGate] = React.useState(null)
+  const [items, setItems] = React.useState([])
   const [picked, setPicked] = React.useState(null)
+  const [token, setToken] = React.useState(null)
+  const [err, setErr] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
 
+  // ① 闸门体检
   React.useEffect(() => {
     let alive = true
     ;(async () => {
       try {
+        const g = await ctx.rest('/apply/gate?job_id=' + encodeURIComponent(job.job_id))
+        if (!alive) return
+        setGate(g)
+        if (!g.can_apply) { setPhase('gate'); return }
         const r = await ctx.rest('/resume/list?job_id=' + encodeURIComponent(job.job_id))
         if (!alive) return
-        const items = (r && r.resumes) || []
-        setState({ phase: 'ready', items })
-        // 默认选匹配分最高的
-        if (items.length) {
-          const best = items.reduce((a, b) =>
+        const list = (r && r.resumes) || []
+        setItems(list)
+        if (list.length) {
+          const best = list.reduce((a, b) =>
             (b.match_score || 0) > (a.match_score || 0) ? b : a)
           setPicked(best.resume_id)
         }
+        setPhase('pick')
       } catch (e) {
-        if (!alive) return
-        setState({ phase: 'error', error: String((e && e.message) || e) })
+        if (alive) { setErr(String((e && e.message) || e)); setPhase('gate') }
       }
     })()
     return () => { alive = false }
   }, [job.job_id, ctx])
 
-  const items = state.items || []
+  // ③ 签令牌
+  const issueToken = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await ctx.rest('/apply/token', {
+        method: 'POST',
+        body: { job_id: job.job_id, resume_id: picked },
+      })
+      if (!r || r.ok === false) {
+        setErr(r && r.error ? r.error : '拿不到确认令牌')
+        if (r && r.stage === 'site_switch') {
+          setGate((g) => g ? { ...g, can_apply: false,
+            blocked_by: [{ gate: 'site_switch', label: r.error, hint: '' }] } : g)
+          setPhase('gate')
+        }
+        return
+      }
+      setToken(r.token)
+      setPhase('confirm')
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // ④ 投递
+  const submit = async () => {
+    setBusy(true); setErr('')
+    try {
+      const r = await ctx.rest('/apply/submit', {
+        method: 'POST',
+        body: { job_id: job.job_id, resume_id: picked, token },
+      })
+      if (!r || r.ok === false) {
+        setErr(r && r.error ? r.error : '投递失败')
+        if (r && r.stage === 'daily_limit') {
+          setGate((g) => g ? { ...g, can_apply: false,
+            blocked_by: [{ gate: 'daily_limit', label: r.error, hint: '' }] } : g)
+          setPhase('gate')
+        }
+        return
+      }
+      setPhase('done')
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const chosen = items.find((r) => r.resume_id === picked)
+  const blocked = (gate && gate.blocked_by) || []
+
+  // 简历列表的每一项 —— 先算成变量，JSX 里只放引用，
+  // 免得嵌套 map 里的括号数到眼花。
+  const resumeRows = items.map((r) => {
+    const score = r.match_score
+    const tagEls = (r.tags || []).slice(0, 6).map((tag, i) => jsx('span', {
+      key: tag + i,
+      className: 'rounded bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
+      children: tag,
+    }))
+    const main = jsxs('div', {
+      className: 'min-w-0 flex-1',
+      children: [
+        jsx('div', { className: 'truncate text-xs font-medium', children: r.title || '' }),
+        jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)', children: (r.created || '').slice(0, 10) }),
+        jsxs('div', { className: 'mt-1.5 flex flex-wrap gap-1', children: tagEls }),
+      ],
+    })
+    const badge = jsx(Badge, {
+      variant: score >= 70 ? 'success' : score >= 50 ? 'warn' : 'muted',
+      children: String(score != null ? score : '—'),
+    })
+    return jsx('button', {
+      key: r.resume_id,
+      type: 'button',
+      onClick: () => setPicked(r.resume_id),
+      className: cn(
+        'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
+        picked === r.resume_id
+          ? 'border-(--ui-stroke-focus) bg-(--ui-bg-secondary)'
+          : 'border-(--ui-stroke-secondary) hover:bg-(--ui-bg-secondary)'
+      ),
+      children: [main, badge],
+    })
+  })
+
+  const emptyBox = jsx('div', {
+    className: 'rounded-md border border-(--ui-stroke-secondary) p-4 text-xs leading-relaxed',
+    children: [
+      jsx('div', { className: 'text-(--ui-text-primary)', children: '还没有可用的简历。' }),
+      jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)', children: '先去「简历匹配优化」生成一份并存进档案，投递时才有东西可选。' }),
+    ],
+  })
+
+  const nextBtn = jsx('button', {
+    type: 'button',
+    disabled: !picked || busy,
+    onClick: issueToken,
+    className: cn('mt-1 self-end rounded-md border border-(--ui-accent) px-3 py-1.5', 'text-xs text-(--ui-text-primary) disabled:opacity-50'),
+    children: busy ? '处理中…' : '下一步：确认投递',
+  })
+
+  const pickBody = items.length === 0
+    ? [emptyBox]
+    : resumeRows.concat([nextBtn])
 
   return jsx('div', {
     className: cn('fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6'),
@@ -574,72 +908,106 @@ function ApplyResumeDialog({ job, ctx, onClose }) {
             }),
           ],
         }),
+
         jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
-          state.phase === 'loading'
-            ? jsx('div', { className: 'py-8 text-center text-xs text-(--ui-text-tertiary)',
-                children: '正在按匹配度排序历史简历…' })
-            : null,
-          state.phase === 'error'
-            ? jsx('div', { className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-xs',
-                children: state.error })
-            : null,
-          state.phase === 'ready' && !items.length
+          // 步骤条
+          jsxs('div', { className: 'flex items-center gap-1 text-[0.625rem]', children:
+            [['体检', 'gate'], ['选简历', 'pick'], ['确认', 'confirm']].map((s, i, arr) => {
+              const order = { gate: 0, pick: 1, confirm: 2 }
+              const cur = order[phase] != null ? order[phase] : 3
+              const done = order[s[1]] < cur
+              const active = order[s[1]] === cur
+              return jsxs('div', { key: s[1], className: 'flex items-center gap-1', children: [
+                jsx('span', {
+                  className: cn('rounded px-1.5 py-0.5',
+                    active ? 'bg-(--ui-accent) text-(--ui-text-primary)'
+                      : done ? 'text-(--ui-text-secondary)' : 'text-(--ui-text-quaternary)'),
+                  children: s[0],
+                }),
+                i < arr.length - 1 ? jsx('span', { className: 'text-(--ui-text-quaternary)', children: '›' }) : null,
+              ]})
+            })}),
+
+          err ? jsx('div', {
+            className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-2.5 text-[0.6875rem] text-(--ui-text-secondary)',
+            children: err,
+          }) : null,
+
+          // ① 闸门没过
+          phase === 'gate' && blocked.length
             ? jsxs('div', {
-                className: 'rounded-md border border-(--ui-stroke-secondary) p-4 text-xs leading-relaxed',
+                className: 'rounded-md border border-(--ui-stroke-secondary) p-3 text-xs leading-relaxed',
                 children: [
-                  jsx('div', { className: 'text-(--ui-text-primary)', children: '还没有可用的简历。' }),
-                  jsx('div', { className: 'mt-1 text-(--ui-text-tertiary)',
-                    children: '先去「简历匹配优化」生成一份并存进档案，投递时才有东西可选。' }),
+                  jsx('div', { className: 'mb-2 text-(--ui-text-primary)', children: '现在不能投，卡在这些地方：' }),
+                  jsxs('div', { className: 'flex flex-col gap-2', children:
+                    blocked.map((b, i) => jsxs('div', {
+                      key: i,
+                      className: 'rounded border border-(--ui-stroke-secondary) p-2',
+                      children: [
+                        jsx('div', { className: 'text-(--ui-text-primary)', children: b.label }),
+                        b.hint ? jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+                          children: b.hint }) : null,
+                      ],
+                    }))}),
+                  gate && gate.daily_limit ? jsx('div', {
+                    className: 'mt-2 text-[0.6875rem] text-(--ui-text-tertiary)',
+                    children: '今日已投 ' + gate.daily_used + ' / 上限 ' + gate.daily_limit,
+                  }) : null,
                 ],
               })
             : null,
-          items.map((r) => jsx('button', {
-            key: r.resume_id,
-            type: 'button',
-            onClick: () => setPicked(r.resume_id),
-            className: cn(
-              'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors',
-              picked === r.resume_id
-                ? 'border-(--ui-stroke-focus) bg-(--ui-bg-secondary)'
-                : 'border-(--ui-stroke-secondary) hover:bg-(--ui-bg-secondary)'
-            ),
-            children: [
-              jsxs('div', { className: 'min-w-0 flex-1', children: [
-                jsx('div', { className: 'truncate text-xs font-medium', children: r.title || '' }),
-                jsx('div', { className: 'mt-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
-                  children: (r.created || '').slice(0, 10) }),
-                jsxs('div', {
-                  className: 'mt-1.5 flex flex-wrap gap-1',
-                  children: (r.tags || []).slice(0, 6).map((tag, i) => jsx('span', {
-                    key: tag + i,
-                    className: 'rounded bg-(--ui-bg-tertiary) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
-                    children: tag,
-                  })),
+
+          phase === 'gate' && !blocked.length
+            ? jsx('div', { className: 'py-6 text-center text-xs text-(--ui-text-tertiary)',
+                children: '正在检查投递条件…' })
+            : null,
+
+          // ② 选简历
+          phase === 'pick'
+            ? jsxs('div', { className: 'flex flex-col gap-2', children: pickBody })
+            : null,
+
+          // ③ 确认
+          phase === 'confirm'
+            ? jsxs('div', { className: 'flex flex-col gap-2', children: [
+                jsx('div', {
+                  className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3 text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
+                  children: [
+                    jsx('div', { children: '即将投递：' + (chosen ? (chosen.title || chosen.resume_id) : '') }),
+                    jsx('div', { className: 'mt-0.5 text-(--ui-text-tertiary)',
+                      children: '岗位：' + (job.title || '') }),
+                    jsx('div', { className: 'mt-0.5 text-(--ui-text-tertiary)',
+                      children: '确认令牌已签发（5 分钟内有效，一次性）' }),
+                  ],
                 }),
-              ]}),
-              jsx(Badge, {
-                variant: (r.match_score || 0) >= 70 ? 'success'
-                  : (r.match_score || 0) >= 50 ? 'warn' : 'muted',
-                children: String(r.match_score != null ? r.match_score : '—'),
-              }),
-            ],
-          })),
-          chosen ? jsxs('div', {
-            className: 'mt-1 flex flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-bg-secondary) p-3 text-[0.6875rem] text-(--ui-text-secondary)',
-            children: [
-              jsx('div', { className: 'leading-relaxed',
-                children: '选定了：' + (chosen.title || chosen.resume_id) }),
-              jsx('div', { className: 'text-(--ui-text-tertiary)',
-                children: '选定只是「用哪份简历」，不等于授权投递。' }),
-              job.url ? jsx('a', {
-                href: job.url,
-                target: '_blank',
-                rel: 'noreferrer',
-                className: 'w-fit rounded-md border border-(--ui-accent) px-2.5 py-1.5 text-(--ui-text-primary)',
-                children: '去招聘网站投递这份简历',
-              }) : null,
-            ],
-          }) : null,
+                jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                  children: '投递不可逆。确认后会真的投出去，并把这份简历存进档案、打上标签。' }),
+                jsxs('div', { className: 'mt-1 flex gap-2', children: [
+                  jsx('button', {
+                    type: 'button',
+                    disabled: busy,
+                    onClick: submit,
+                    className: cn('rounded-md border border-(--ui-accent) px-3 py-1.5 text-xs',
+                      'text-(--ui-text-primary) disabled:opacity-50'),
+                    children: busy ? '投递中…' : '确认投递',
+                  }),
+                  job.url ? jsx('a', {
+                    href: job.url, target: '_blank', rel: 'noreferrer',
+                    className: 'rounded-md border border-(--ui-stroke-secondary) px-3 py-1.5 text-xs text-(--ui-text-secondary)',
+                    children: '去招聘网站手动投',
+                  }) : null,
+                ]}),
+              ]})
+            : null,
+
+          // 完成
+          phase === 'done'
+            ? jsxs('div', { className: 'py-6 text-center', children: [
+                jsx('div', { className: 'text-sm text-(--ui-text-primary)', children: '投递完成' }),
+                jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)',
+                  children: '简历已存进「用户简历」并打好标签' }),
+              ]})
+            : null,
         ]}),
       ],
     }),
@@ -894,6 +1262,14 @@ const SITE_META = {
 }
 
 
+/** mock 模式状态 —— 开发时一眼看到「现在跑的是假数据」。 */
+function useMock(ctx) {
+  return useQuery({
+    queryKey: ['job-radar', 'mock-status'],
+    queryFn: async () => ctx.rest('/mock/status'),
+  })
+}
+
 /** 插件运行日志。默认不拉 —— 用户点开才请求。 */
 function useLogs(ctx, enabled) {
   return useQuery({
@@ -911,9 +1287,30 @@ function PlatformView({ ctx, cfg }) {
   const settings = (cfg && cfg.settings) || {}
   const [showLogs, setShowLogs] = React.useState(false)
   const logsQ = useLogs(ctx, showLogs)
+  const mockQ = useMock(ctx)
+  const mockOn = mockQ.data && mockQ.data.mock && mockQ.data.mock.enabled
 
   return jsxs(Fragment, {
     children: [
+      // 开发模式的横幅 —— 一眼看到现在跑的是真数据还是假数据
+      mockOn ? jsx('div', {
+        className: 'mb-3 flex items-center gap-2 rounded-md border border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-3 py-2 text-[0.6875rem] text-(--ui-text-secondary)',
+        children: [
+          jsx('span', { className: 'font-medium', children: '开发模式' }),
+          jsx('span', { className: 'text-(--ui-text-tertiary)',
+            children: '投递闸门、经历、模板转换现在用的是 mock 数据' }),
+          jsx('button', {
+            type: 'button',
+            onClick: async () => {
+              await ctx.rest('/mock/reset', { method: 'POST' })
+              mockQ.refetch()
+              host.notify({ kind: 'success', message: 'mock 状态已重置' })
+            },
+            className: 'ml-auto rounded border border-(--ui-stroke-secondary) px-2 py-0.5 text-[0.625rem]',
+            children: '重置',
+          }),
+        ],
+      }) : null,
       jsx(Panel, {
         title: '登录态体检',
         hint: summary.verdict || '',
@@ -1253,15 +1650,25 @@ function ResumeView({ ctx }) {
             jsx('button', {
               key: '__upload',
               type: 'button',
+              onClick: () => uploadTplRef.current && uploadTplRef.current.click(),
               className: 'flex min-h-40 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-strong) p-4 text-xs text-(--ui-text-tertiary) transition-colors hover:border-(--ui-stroke-focus) hover:text-(--ui-text-secondary)',
               children: [
                 jsx('span', { className: 'text-lg', children: '＋' }),
-                jsx('span', { children: '上传模板' }),
+                jsx('span', { children: converting ? '转换中…' : '上传模板' }),
               ],
             }),
           ])
         }),
       ]}),
+    }),
+
+    // 隐藏的文件选择框 —— 「＋ 上传模板」格子点它
+    jsx('input', {
+      ref: uploadTplRef,
+      type: 'file',
+      accept: '.docx,.pdf,.png,.jpg,.jpeg,.webp',
+      className: 'hidden',
+      onChange: onPickTemplate,
     }),
 
     // ── 用户简历 ──

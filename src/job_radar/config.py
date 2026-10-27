@@ -36,7 +36,7 @@ def load_config():
     """插件配置。ctx 不可用时回落到默认值。"""
     if _CTX is None:
         return {"keywords": [], "city": "653", "boss_city": "101210100",
-                "min_score": 50, "max_jobs_per_run": 30,
+                "min_score": 50, "max_jobs_per_run": 30, "mock": False,
                 "sites": ["zhaopin"], "request_gap_seconds": 12,
                 "rounds_per_day": 4, "push_max": 3,
                 "push_new_only": True, "notify_on_failure": True,
@@ -47,6 +47,7 @@ def load_config():
         "city": get("city", default="653"),
         "boss_city": get("boss_city", default="101210100"),
         "min_score": int(get("min_score", default=50)),
+        "mock": bool(get("mock", default=False)),
         "max_jobs_per_run": int(get("max_jobs_per_run", default=30)),
         "sites": get("sites", default=["zhaopin"]),
         "request_gap_seconds": int(get("request_gap_seconds", default=12)),

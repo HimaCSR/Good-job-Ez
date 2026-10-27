@@ -58,6 +58,15 @@ bash scripts/dev.sh install .
 它会：agent 半边建 junction + 桌面半边同步一份 → 打印后续步骤。
 
 > **桌面端默认禁用** —— 去 Settings ▸ Plugins 把「好岗好找」打开一次。
+
+**开发模式**：投递闸门、经历结构化、模板转换还没接真实现，
+但可以用 mock 数据把前后端跑通：
+
+```bash
+hermes config set plugins.entries.job-radar.settings.mock true
+```
+
+平台接入页会显示「开发模式」横幅。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 > 这是 Hermes 对「统一包」的设计：一个开关管两半，默认关着。
 > 打开之后，agent 侧和桌面侧一起生效，Plugins 页里配对显示。
 
