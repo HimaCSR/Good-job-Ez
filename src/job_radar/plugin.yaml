@@ -30,3 +30,5 @@ config_schema:
   apply_limit_zhaopin: {type: int, default: 5, description: "智联招聘每日投递上限"}
   apply_limit_boss: {type: int, default: 5, description: "BOSS 直聘每日投递上限"}
   apply_limit_huibo: {type: int, default: 3, description: "汇博招聘每日投递上限"}
+  smart_template: {type: bool, default: true, description: "由 Agent 按 JD 自行推荐简历模板"}
+  template_allow: {type: list, default: [], description: "限定 Agent 只在这些模板里推荐（空=全部）"}

@@ -446,6 +446,85 @@ function ExperienceForm({ exp, busy, onCancel, onSave }) {
   })
 }
 
+/* 从简历文档导入 —— 本地规则解析，不走大模型。
+ *
+ * **文件不离开这台电脑**：读进来就在内存里解析，不落盘、不外传。
+ * 解析结果是**草稿**，填进表单后用户自己核对、保存。
+ */
+function ResumeImportPanel({ ctx, onDraft }) {
+  const [file, setFile] = React.useState(null)
+  const [status, setStatus] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+
+  const doParse = async () => {
+    if (!file) { setStatus('先选一个文件'); return }
+    setBusy(true); setStatus('解析中…')
+    try {
+      const buf = await file.arrayBuffer()
+      let binary = ''
+      const bytes = new Uint8Array(buf)
+      const chunk = 0x8000
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
+      }
+      const r = await ctx.rest('/resume/import', {
+        method: 'POST',
+        body: { filename: file.name, data_base64: btoa(binary) },
+      })
+      if (!r || r.ok === false) {
+        setStatus((r && r.error) || '解析失败')
+        return
+      }
+      const found = r.found || {}
+      const bits = []
+      if (found.identity) bits.push('身份 ' + found.identity + ' 项')
+      if (found.skills) bits.push('技能 ' + found.skills + ' 个')
+      if (found.experiences) bits.push('经历 ' + found.experiences + ' 段')
+      setStatus((r.note ? r.note + ' ' : '') + (bits.length ? '已识别：' + bits.join('、') : '没识别出内容'))
+      if (r.draft) onDraft && onDraft(r.draft)
+    } catch (e) {
+      setStatus(String((e && e.message) || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return jsxs('div', { className: 'flex flex-col gap-3', children: [
+    jsx('label', {
+      className: 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-strong) bg-(--ui-bg-secondary) px-4 py-6 text-center hover:bg-(--ui-bg-tertiary)',
+      children: [
+        jsx('span', { className: 'text-sm text-(--ui-text-primary)',
+          children: file ? file.name : '拖入或点击选择简历文件' }),
+        jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+          children: '支持 .docx / .pdf / .txt · 解析在本机完成，文件不会离开这台电脑' }),
+        jsx('input', {
+          type: 'file',
+          accept: '.docx,.pdf,.txt',
+          className: 'hidden',
+          onChange: (e) => {
+            const f = e.target.files && e.target.files[0]
+            setFile(f || null)
+            setStatus(f ? '已选：' + f.name : '')
+          },
+        }),
+      ],
+    }),
+    jsxs('div', { className: 'flex items-center gap-2.5', children: [
+      jsx(Button, {
+        size: 'sm',
+        variant: 'primary',
+        disabled: busy || !file,
+        onClick: doParse,
+        children: busy ? '解析中…' : '识别并填写表单',
+      }),
+      jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+        children: status || '先选一个文件' }),
+    ]}),
+    jsx('span', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+      children: '识别走的是本地规则解析（按段落结构 + 字段关键词抽取），不调用大模型，避免简历内容被发送出去。解析结果只是一份草稿，确认无误后再点「保存」才写入。' }),
+  ]})
+}
+
 function ProfileView({ ctx, cfg, onSaved }) {
   const qc = useQueryClient()
   const profile = (cfg && cfg.profile) || {}
@@ -467,12 +546,50 @@ function ProfileView({ ctx, cfg, onSaved }) {
   const identity = local.identity || {}
   const setIdentity = (k, v) => set((s) => ({ ...s, identity: { ...(s.identity || {}), [k]: v } }))
 
+  // 简历解析出来的草稿 → 填进表单
+  // **只填空位，不覆盖用户已填的** —— 用户手改过的比机器抽的准。
+  const applyDraft = (draft) => {
+    setLocal((s) => {
+      const next = { ...s }
+      if (draft.identity) {
+        next.identity = { ...(s.identity || {}) }
+        for (const [k, v] of Object.entries(draft.identity)) {
+          if (v && !next.identity[k]) next.identity[k] = v
+        }
+      }
+      if (draft.skills && draft.skills.length) {
+        const have = new Set(s.skills || [])
+        next.skills = [...(s.skills || []), ...draft.skills.filter((x) => !have.has(x))]
+      }
+      if (draft.cities && draft.cities.length) {
+        const have = new Set(s.cities || [])
+        next.cities = [...(s.cities || []), ...draft.cities.filter((x) => !have.has(x))]
+      }
+      if (draft.title_keywords && draft.title_keywords.length) {
+        const have = new Set(s.title_keywords || [])
+        next.title_keywords = [...(s.title_keywords || []),
+          ...draft.title_keywords.filter((x) => !have.has(x))]
+      }
+      if (draft.min_salary && !s.min_salary) next.min_salary = draft.min_salary
+      if (draft.experience_text && !s.experience_text) {
+        next.experience_text = draft.experience_text
+      }
+      return next
+    })
+  }
+
   if (!profile || !Object.keys(profile).length) {
     return jsx(ErrorState, { message: '读不到个人画像' })
   }
 
   return jsxs(Fragment, {
     children: [
+      jsx(Panel, {
+        title: '从简历文档导入',
+        hint: '本地解析，不走大模型',
+        children: jsx(ResumeImportPanel, { ctx, onDraft: applyDraft }),
+      }),
+      jsx('div', { className: 'h-3' }),
       jsx(Panel, {
         title: '身份信息',
         hint: '仅用于简历生成表单',
@@ -1570,7 +1687,99 @@ function PlatformView({ ctx, cfg }) {
 
 // ── 日报 ────────────────────────────────────────────────────────────────────
 
-function ReportView({ ctx }) {
+/* 推送内容 —— 定时与推送的设置。
+ *
+ * **次要设置收进「高级」按钮**（模块标题栏右上角，默认折叠）——
+ * 这是 UI 约定：日报模块顺序是「今日日报 → 推送内容」，
+ * 最重要的内容放首位。
+ */
+function PushSettingsPanel({ ctx, cfg }) {
+  const qc = useQueryClient()
+  const settings = (cfg && cfg.settings) || {}
+  const [advOpen, setAdvOpen] = React.useState(false)
+  const save = useMutation({
+    mutationFn: async (next) =>
+      ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'config'] })
+      host.notify({ kind: 'success', message: '推送设置已保存' })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String((e && e.message) || e) }),
+  })
+
+  const set = (k, v) => save.mutate({ ...settings, [k]: v })
+
+  const row = (title, desc, control) => jsxs('div', {
+    className: 'flex items-start gap-3',
+    children: [
+      jsxs('div', { className: 'min-w-0 flex-1', children: [
+        jsx('div', { className: 'text-sm font-medium', children: title }),
+        desc ? jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+          children: desc }) : null,
+      ]}),
+      control,
+    ],
+  })
+
+  const toggle = (key) => jsx('input', {
+    type: 'checkbox',
+    checked: settings[key] !== false,
+    disabled: save.isPending,
+    onChange: (e) => set(key, e.target.checked),
+    className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+  })
+
+  const rounds = settings.rounds_per_day ?? 4
+  const pushMax = settings.push_max ?? 3
+
+  return jsx(Panel, {
+    title: '推送内容',
+    hint: '每条 = 一份岗位，名称 + 城市 + 链接',
+    actions: jsx('button', {
+      type: 'button',
+      onClick: () => setAdvOpen((v) => !v),
+      className: cn(
+        'rounded-md border px-2.5 py-1 text-[0.6875rem]',
+        advOpen
+          ? 'border-(--ui-stroke-strong) bg-(--ui-bg-secondary) text-(--ui-text-primary)'
+          : 'border-(--ui-stroke-secondary) text-(--ui-text-secondary) hover:bg-(--ui-bg-secondary)'),
+      children: advOpen ? '收起' : '高级',
+    }),
+    children: jsxs('div', { className: 'flex flex-col gap-3', children: [
+      jsx('div', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
+        children: '每天 ' + rounds + ' 次自动抓取并推送；每次最多 ' + pushMax + ' 条。' +
+          (settings.push_new_only !== false ? '只推当天新出现的岗位。' : '每次都会推最高分的几条。') }),
+      advOpen ? jsxs('div', { className: 'flex flex-col gap-3 border-t border-(--ui-stroke-secondary) pt-3', children: [
+        row('自动抓取并推送', '当前：每 ' + rounds + ' 小时一次',
+          toggle('notify_on_failure')),
+        row('只推当天新岗位', '老岗位不重复推。关掉则每次推最高分的几条',
+          toggle('push_new_only')),
+        row('每次最多推几条', '条',
+          jsx(Input, {
+            type: 'number',
+            min: 1,
+            value: String(pushMax),
+            disabled: save.isPending,
+            onChange: (e) => set('push_max', Number(e.target.value) || 0),
+            className: 'w-20',
+          })),
+        row('每天抓取次数', '次',
+          jsx(Input, {
+            type: 'number',
+            min: 1,
+            value: String(rounds),
+            disabled: save.isPending,
+            onChange: (e) => set('rounds_per_day', Number(e.target.value) || 0),
+            className: 'w-20',
+          })),
+        row('失败也通知', '抓不到数据时告诉你原因，而不是静默',
+          toggle('notify_on_failure')),
+      ]}) : null,
+    ]}),
+  })
+}
+
+function ReportView({ ctx, cfg }) {
   const q = useQuery({
     queryKey: ['job-radar', 'report'],
     queryFn: async () => ctx.rest('/report'),
@@ -1578,18 +1787,21 @@ function ReportView({ ctx }) {
   })
   const md = (q.data && q.data.markdown) || ''
 
-  return jsx(Panel, {
-    title: '今日日报',
-    hint: q.isLoading ? '加载中…' : 'plugin-data/job-radar/reports/',
-    children: q.isLoading
-      ? jsx(GlyphSpinner, { className: 'p-4' })
-      : q.isError
-        ? jsx(ErrorState, { message: String(q.error) })
-        : jsx('pre', {
-            className: 'max-h-[60vh] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed',
-            children: md || '（今天还没有日报）',
-          }),
-  })
+  return jsxs('div', { className: 'flex flex-col gap-4', children: [
+    jsx(Panel, {
+      title: '今日日报',
+      hint: q.isLoading ? '加载中…' : 'plugin-data/job-radar/reports/',
+      children: q.isLoading
+        ? jsx(GlyphSpinner, { className: 'p-4' })
+        : q.isError
+          ? jsx(ErrorState, { message: String(q.error) })
+          : jsx('pre', {
+              className: 'max-h-[60vh] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed',
+              children: md || '（今天还没有日报）',
+            }),
+    }),
+    jsx(PushSettingsPanel, { ctx, cfg }),
+  ]})
 }
 
 // ── 设置 ────────────────────────────────────────────────────────────────────
@@ -1691,9 +1903,17 @@ function SettingsPage({ ctx }) {
   const cfgQ = useConfig(ctx)
   const cfg = cfgQ.data
 
+  // **Hook 必须在条件 return 之前调用** —— React 规则。
+  // 之前 useState 写在下面 loading/error 的 return 之后：
+  //   首次渲染 isLoading=true → 提前 return → useState 没执行
+  //   → 数据到了再渲染 → Hook 数量变了 → 标签栏状态错乱
+  //   → 表现就是「只有个人信息模块，标签栏不出现」
+  const [tab, setTab] = React.useState('profile')
+
   const tabs = [
     { id: 'profile', label: '个人信息' },
     { id: 'recommend', label: '岗位推荐' },
+    { id: 'resume', label: '用户简历' },
     { id: 'platform', label: '平台接入' },
     { id: 'report', label: '日报' },
   ]
@@ -1711,16 +1931,16 @@ function SettingsPage({ ctx }) {
     })
   }
 
-  const [tab, setTab] = React.useState('profile')
   const body = {
     profile: jsx(ProfileView, { ctx, cfg }),
     recommend: jsx(RecommendView, { ctx, cfg }),
+    resume: jsx(ResumeView, { ctx, cfg }),
     platform: jsx(PlatformView, { ctx, cfg }),
     report: jsx(ReportView, { ctx }),
   }[tab]
 
   return jsxs('div', {
-    className: 'mx-auto flex h-full max-w-4xl flex-col gap-4 overflow-y-auto p-6',
+    className: 'mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-6',
     children: [
       jsxs('div', { className: 'flex items-start gap-3', children: [
         jsxs('div', { children: [
@@ -1769,7 +1989,7 @@ function Segmented({ tabs, active, onChange }) {
 // 设置页这种体量不适合停靠 —— 主入口用 Settings ▸ Plugins。
 
 /** 用户简历 —— 上面是模板库，下面是自己的简历档案。 */
-function ResumeView({ ctx }) {
+function ResumeView({ ctx, cfg }) {
   const tplQ = useQuery({
     queryKey: ['job-radar', 'templates'],
     queryFn: async () => ctx.rest('/templates'),
@@ -1781,6 +2001,17 @@ function ResumeView({ ctx }) {
   const qc = useQueryClient()
   const [picked, setPicked] = React.useState(['classic', 'modern'])
   const [helpOpen, setHelpOpen] = React.useState(false)
+
+  const settings = (cfg && cfg.settings) || {}
+  const saveSettings = useMutation({
+    mutationFn: async (next) =>
+      ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'config'] })
+      host.notify({ kind: 'success', message: '设置已保存' })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String((e && e.message) || e) }),
+  })
 
   const templates = (tplQ.data && tplQ.data.templates) || []
   const resumes = (resQ.data && resQ.data.resumes) || []
@@ -1852,6 +2083,44 @@ function ResumeView({ ctx }) {
       accept: '.docx,.pdf,.png,.jpg,.jpeg,.webp',
       className: 'hidden',
       onChange: onPickTemplate,
+    }),
+
+    // ── 智能选模板 ──
+    jsx(Panel, {
+      title: '智能选模板',
+      children: jsxs('div', { className: 'flex flex-col gap-3', children: [
+        jsxs('div', { className: 'flex items-start gap-3', children: [
+          jsx('div', { className: 'min-w-0 flex-1', children: [
+            jsx('div', { className: 'text-sm font-medium', children: '由 Agent 按 JD 自行推荐模板' }),
+            jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+              children: '开启后，生成简历时会先读一遍 JD，再挑最合适的版式：要求简洁就选经典单栏，技能项多就选现代双栏，看重技术深度就选技术极客。你随时能在生成结果里手动换回去。' }),
+          ]}),
+          jsx('input', {
+            type: 'checkbox',
+            checked: settings.smart_template !== false,
+            disabled: saveSettings.isPending,
+            onChange: (e) => saveSettings.mutate({ ...settings, smart_template: e.target.checked }),
+            className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+          }),
+        ]}),
+        jsxs('div', { className: 'flex items-start gap-3', children: [
+          jsx('div', { className: 'min-w-0 flex-1', children: [
+            jsx('div', { className: 'text-sm font-medium', children: '只在你勾选的模板里挑' }),
+            jsx('div', { className: 'mt-0.5 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+              children: '勾上后，Agent 只能从上面选中的模板里推荐（可多选）。一个都没勾时，它会在全部模板里自己选。' }),
+          ]}),
+          jsx('input', {
+            type: 'checkbox',
+            checked: Array.isArray(settings.template_allow) && settings.template_allow.length > 0,
+            disabled: saveSettings.isPending,
+            onChange: (e) => saveSettings.mutate({
+              ...settings,
+              template_allow: e.target.checked ? picked : [],
+            }),
+            className: 'mt-0.5 h-3.5 w-3.5 shrink-0 accent-(--ui-accent)',
+          }),
+        ]}),
+      ]}),
     }),
 
     // ── 用户简历 ──
@@ -1954,7 +2223,7 @@ function ViewBody({ ctx, view, cfg }) {
     case 'recommend': return jsx(RecommendView, { ctx, cfg })
     case 'resume':    return jsx(ResumeView, { ctx, cfg })
     case 'platform':  return jsx(PlatformView, { ctx, cfg })
-    case 'report':    return jsx(ReportView, { ctx })
+    case 'report':    return jsx(ReportView, { ctx, cfg })
     default:          return jsx(ProfileView, { ctx, cfg })
   }
 }
@@ -1996,9 +2265,29 @@ export default {
   },
 }
 
-/** Settings ▸ Plugins 下的子页 —— 单个模块，无顶部标签栏。 */
+/** Settings ▸ Plugins 下的子页 —— **带顶部标签栏**。
+ *
+ * 之前这个子页没有标签栏，用户从 Plugins 页进来只能看一个模块，
+ * 想切别的得退回主页面 —— 跟 demo 的单页长滚动不一致。
+ * 现在子页也有标签栏，切视图不用退回。
+ *
+ * 宽度跟主页面一致（max-w-5xl），否则两处排版不一样。
+ */
 function SubPage({ ctx, view }) {
   const cfgQ = useConfig(ctx)
+  const [tab, setTab] = React.useState(view)
+
+  // 视图变了（从别处跳进来）就跟着切
+  React.useEffect(() => { setTab(view) }, [view])
+
+  const tabs = [
+    { id: 'profile', label: '个人信息' },
+    { id: 'recommend', label: '岗位推荐' },
+    { id: 'resume', label: '用户简历' },
+    { id: 'platform', label: '平台接入' },
+    { id: 'report', label: '日报' },
+  ]
+
   if (cfgQ.isLoading) {
     return jsx('div', { className: 'flex h-full items-center justify-center', children: jsx(GlyphSpinner, {}) })
   }
@@ -2006,7 +2295,12 @@ function SubPage({ ctx, view }) {
     return jsx('div', { className: 'flex h-full items-center justify-center p-6', children: jsx(ErrorState, { message: String(cfgQ.error) }) })
   }
   return jsx('div', {
-    className: 'mx-auto flex w-full max-w-3xl flex-col gap-4 p-6',
-    children: jsx(ViewBody, { ctx, view, cfg: cfgQ.data }),
+    className: 'mx-auto flex h-full w-full max-w-5xl flex-col gap-4 overflow-y-auto p-6',
+    children: [
+      jsx('div', { className: 'flex justify-end', children:
+        jsx(Segmented, { tabs, active: tab, onChange: setTab }),
+      }),
+      jsx(ViewBody, { ctx, view: tab, cfg: cfgQ.data }),
+    ],
   })
 }
