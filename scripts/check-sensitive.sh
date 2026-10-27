@@ -17,8 +17,14 @@ cd "$REPO_ROOT"
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; DIM=$'\033[2m'; OFF=$'\033[0m'
 FAIL=0
 
-# 只扫版本控制里的文件，别扫 .git 和缓存
-TRACKED="$(git ls-files 2>/dev/null || find . -type f -not -path './.git/*' -not -name '*.pyc')"
+# 扫版本控制里的文件 + **未跟踪的新文件**。
+# 只扫 git ls-files 会漏掉还没 git add 的新文件 ——
+# 正好是新写的文档最容易带隐私路径的时候。
+# core.quotepath=false —— 不然 git 会把中文文件名转义成八进制
+# （"docs/\346\226\260..."），xargs grep 拿着转义后的名字找不到文件，
+# **中文名的文件等于没扫**。
+TRACKED="$(git -c core.quotepath=false ls-files --cached --others --exclude-standard 2>/dev/null || \
+            find . -type f -not -path './.git/*' -not -name '*.pyc')"
 
 # 有些文件**必须**包含敏感形状（比如测试要验证打码逻辑本身）。
 # 在文件首行加 `# sensitive-scan: allow` 就能豁免，但要在豁免清单里登记。
@@ -52,8 +58,12 @@ scan "真实邮箱" "[A-Za-z0-9._%+-]+@(?!example\.(com|org))[A-Za-z0-9.-]+\.[A-
      "改成 user@example.com"
 
 # ④ 本机绝对路径
-scan "本机绝对路径" "C:\\\\Users\\\\|/Users/[a-z]|/home/[a-z]" \
-     "改成 <HERMES_HOME> 之类的占位"
+#
+# 只抓**隐私路径**，不抓系统安装路径 ——
+# `C:\Program Files\Git\bin\bash.exe` 所有用户都一样，不是隐私；
+# `C:\Users\<你的名字>` 和 `D:\<你自己的盘>` 才是。
+scan "本机绝对路径" "C:[/\\]Users[/\\]|/Users/[a-z]|/home/[a-z]|[D-Z]:[/\\]" \
+     "改成 <HERMES_HOME> / \$LOCALAPPDATA 之类的占位"
 
 # ⑤ 真实公司名（招聘站抓到的公司）
 scan "真实公司名" "杭州东识科技|贵州锦溪人力资源|大连旭诚海圣|杭州云开量智能|杭州未驰网络" \
