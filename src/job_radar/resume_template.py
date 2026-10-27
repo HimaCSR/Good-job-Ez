@@ -16,8 +16,9 @@
 
 import os
 
-# 模板目录（相对插件根）
-TEMPLATES_DIR = "templates"
+# 模板目录 —— **相对插件目录**，不是相对当前工作目录。
+# 相对 cwd 的话，换个目录跑脚本就找不到模板了。
+TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
 # ── 共享 HTML 骨架 ───────────────────────────────────────────────────────────
 # 所有模板共用同一份 DOM，只有 CSS 不同。
@@ -269,16 +270,55 @@ def template_info(template_id):
 
 
 def list_all():
-    """全部可用模板（内置 + 上传的）。"""
+    """全部可用模板（内置 + 上传的）。
+
+    **两个来源都要收**：
+    - TEMPLATES_DIR 里的 .html 文件（真正的模板实现）
+    - SQLite 的 resume_templates 表（上传转换时登记的记录）
+
+    只扫目录会漏掉「已登记但还没生成 HTML」的模板 ——
+    上传转换是两步：先登记，再生成 HTML。第二步没做完时，
+    模板在库里但不在目录里，列表就少了它。
+    """
     out = [template_info(t) for t in BUILTIN]
+    seen = set(BUILTIN)
+
     if os.path.isdir(TEMPLATES_DIR):
         for name in sorted(os.listdir(TEMPLATES_DIR)):
             if not name.endswith(".html"):
                 continue
             tid = name[:-5]
-            if tid in BUILTIN:
+            if tid in seen:
                 continue
             info = template_info(tid)
             if info:
                 out.append(info)
+                seen.add(tid)
+
+    # 数据库里的登记记录（还没生成 HTML 的也算，标记清楚）
+    #
+    # 内置模板**不进这张表** —— 它们的真源是代码里的 BUILTIN，
+    # 存一份到数据库只会造成两个真源打架。
+    try:
+        from . import storage as _storage
+        for row in _storage.list_templates():
+            tid = row.get("template_id")
+            if not tid or tid in seen:
+                continue
+            if row.get("builtin"):
+                continue
+            out.append({
+                "template_id": tid,
+                "name": row.get("name") or tid,
+                "description": row.get("description") or "",
+                "format": row.get("format") or "docx",
+                "builtin": False,
+                "source_path": row.get("source_path") or "",
+                "preview_path": row.get("preview_path") or "",
+                "pending": True,      # 还没生成 HTML —— 渲染时回退到默认模板
+            })
+            seen.add(tid)
+    except Exception:
+        pass
+
     return out

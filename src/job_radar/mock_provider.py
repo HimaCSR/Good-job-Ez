@@ -20,6 +20,7 @@
         data = 真实实现()
 """
 
+import hashlib
 import json
 import os
 import uuid
@@ -340,7 +341,11 @@ def convert_template(filename, content_b64=None, kind=None):
 
     size = len(content_b64 or "") * 3 // 4
     out = dict(MOCK_CONVERT_RESULT)
-    out["template_id"] = "mock-" + uuid.uuid4().hex[:8]
+    # **id 由文件名派生**，不是随机的 ——
+    # 同一个文件反复转换应该覆盖同一条记录，
+    # 随机会在模板库里堆一堆「我的简历」重复项。
+    digest = hashlib.md5(name.encode("utf-8")).hexdigest()[:8]
+    out["template_id"] = "mock-" + digest
     out["name"] = os.path.splitext(name)[0]
     out["format"] = "docx" if ext == "docx" else ext
     out["source_path"] = name
