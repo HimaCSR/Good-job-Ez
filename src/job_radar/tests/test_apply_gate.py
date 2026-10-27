@@ -46,6 +46,35 @@ class _FakeStorage:
         storage._conn = self._orig
 
 
+class _FakeConfig:
+    """把配置读写顶成内存字典。
+
+    **读写都要顶** —— 只顶 `_cli_settings`（读）不够：
+    `set_site_switch` / `set_daily_limit` 会走 `_cli_set`（写），
+    那是真调 `hermes config set`：
+    - 本机有 Hermes CLI → 真的改了用户的 config.yaml（污染！）
+    - CI 上没有 Hermes CLI → 直接抛「找不到 hermes CLI」
+
+    两种环境都不该在单测里发生。
+    """
+
+    def __init__(self, settings=None):
+        # **不复制** —— 测试里常写 `self._settings["apply_zhaopin"] = False`
+        # 来切换状态，复制了就切换不到（改的是另一份 dict）。
+        self.settings = settings if settings is not None else {}
+        self._orig_get = ag._cli_settings
+        self._orig_set = ag._cli_set
+        ag._cli_settings = lambda: dict(self.settings)
+
+        def _set(key, value):
+            self.settings[key] = value
+        ag._cli_set = _set
+
+    def restore(self):
+        ag._cli_settings = self._orig_get
+        ag._cli_set = self._orig_set
+
+
 class TestSwitchDefaults(unittest.TestCase):
     """第一道门：站点开关默认全关。"""
 
@@ -91,12 +120,11 @@ class TestGateThreeDoors(unittest.TestCase):
     def setUp(self):
         self.fs = _FakeStorage()
         self._settings = {"apply_zhaopin": True, "apply_limit_zhaopin": 2}
-        # 把配置读取顶掉，避免测试碰真实 config.yaml
-        self._orig_settings = ag._cli_settings
-        ag._cli_settings = lambda: dict(self._settings)
+        # 配置读写都顶掉 —— 不能碰真实 config.yaml
+        self.cfg = _FakeConfig(self._settings)
 
     def tearDown(self):
-        ag._cli_settings = self._orig_settings
+        self.cfg.restore()
         self.fs.restore()
 
     # ── 门 1：站点开关 ──
@@ -217,12 +245,11 @@ class TestGateStatusShape(unittest.TestCase):
 
     def setUp(self):
         self.fs = _FakeStorage()
-        self._orig_settings = ag._cli_settings
-        ag._cli_settings = lambda: {"apply_zhaopin": True,
-                                     "apply_limit_zhaopin": 5}
+        self.cfg = _FakeConfig({"apply_zhaopin": True,
+                                "apply_limit_zhaopin": 5})
 
     def tearDown(self):
-        ag._cli_settings = self._orig_settings
+        self.cfg.restore()
         self.fs.restore()
 
     def test_reports_remaining(self):
@@ -240,12 +267,11 @@ class TestSwitchesApi(unittest.TestCase):
 
     def setUp(self):
         self.fs = _FakeStorage()
-        self._orig_settings = ag._cli_settings
         self._settings = {"apply_zhaopin": True, "apply_limit_zhaopin": 5}
-        ag._cli_settings = lambda: dict(self._settings)
+        self.cfg = _FakeConfig(self._settings)
 
     def tearDown(self):
-        ag._cli_settings = self._orig_settings
+        self.cfg.restore()
         self.fs.restore()
 
     def test_all_switches_shape(self):
@@ -266,6 +292,28 @@ class TestSwitchesApi(unittest.TestCase):
 
     def test_set_daily_limit_clamps(self):
         self.assertEqual(ag.set_daily_limit("boss", -1)["sites"]["boss"]["daily_limit"], 0)
+
+    def test_write_path_does_not_touch_real_config(self):
+        """写路径必须被隔离。
+
+        **两个环境都会出事**：
+        - 本机有 Hermes CLI → 真改了用户的 config.yaml
+        - CI 上没有 Hermes CLI → 抛「找不到 hermes CLI」，测试直接失败
+
+        所以 `_cli_set` 和 `_cli_settings` **两个都要顶**。
+        这个断言就是防回归的。
+        """
+        ag.set_site_switch("boss", True)
+        ag.set_daily_limit("boss", 3)
+        self.assertTrue(self.cfg.settings["apply_boss"])
+        self.assertEqual(self.cfg.settings["apply_limit_boss"], 3)
+
+    def test_switch_write_then_read_is_consistent(self):
+        """写完立刻读，读到的要是新值。"""
+        ag.set_site_switch("zhaopin", False)
+        self.assertFalse(ag.site_switch_enabled("zhaopin"))
+        ag.set_site_switch("zhaopin", True)
+        self.assertTrue(ag.site_switch_enabled("zhaopin"))
 
 
 class TestStorageTables(unittest.TestCase):
