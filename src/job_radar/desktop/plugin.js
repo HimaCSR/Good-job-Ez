@@ -512,7 +512,7 @@ function ResumeImportPanel({ ctx, onDraft }) {
     jsxs('div', { className: 'flex items-center gap-2.5', children: [
       jsx(Button, {
         size: 'sm',
-        variant: 'primary',
+        variant: 'default',
         disabled: busy || !file,
         onClick: doParse,
         children: busy ? '解析中…' : '识别并填写表单',
@@ -719,7 +719,7 @@ function ProfileView({ ctx, cfg, onSaved }) {
         hint: '简历定向优化的唯一原料',
         actions: jsx(Button, {
           size: 'sm',
-          variant: 'primary',
+          variant: 'default',
           disabled: save.isPending,
           onClick: () => save.mutate(local),
           children: save.isPending ? '保存中…' : '保存',
@@ -1834,7 +1834,7 @@ function SettingsView({ ctx, cfg }) {
         hint: '改动立即生效',
         actions: jsx(Button, {
           size: 'sm',
-          variant: 'primary',
+          variant: 'default',
           disabled: save.isPending,
           onClick: () => save.mutate(local),
           children: save.isPending ? '保存中…' : '保存',
@@ -2325,7 +2325,7 @@ function ResumeRow({ resume }) {
     jsxs('div', { className: 'min-w-0 flex-1', children: [
       jsx('div', { className: 'truncate text-xs font-medium', children: resume.title }),
       jsx('div', { className: 'mt-1 flex flex-wrap items-center gap-1.5', children:
-        tags.map((tg) => jsx(Badge, { key: tg, variant: 'soft', children: tg }))
+        tags.map((tg) => jsx(Badge, { key: tg, variant: 'muted', children: tg }))
       }),
       jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children:
         (resume.source === 'applied' ? '投递生成' : resume.source === 'optimized' ? '匹配优化' : '手动上传')

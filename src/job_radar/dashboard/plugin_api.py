@@ -45,6 +45,7 @@ _SIBLINGS = (
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
     "mock_provider", "apply_gate", "browser_session", "resume_import",
+    "template_convert", "template_store",
 )
 
 
@@ -85,8 +86,110 @@ def _load_siblings() -> Dict[str, Any]:
 _SIBLING_MODULES = _load_siblings()
 
 
+def _module_mtime(name: str) -> float:
+    """模块源文件的 mtime；拿不到返回 0。"""
+    path = os.path.join(_PLUGIN_ROOT, name + ".py")
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0.0
+
+
+# 每个模块的源码 mtime —— 用来判断要不要重新加载
+_SIBLING_MTIMES = {
+    name: _module_mtime(name) for name in _SIBLING_MODULES
+}
+
+
+def _dev_hot_reload() -> bool:
+    """开发模式热重载开了吗？
+
+    ## 判据
+
+    **插件目录是软链/junction** → 说明这是开发目录（指向仓库），
+    自动开热重载。
+
+    正式安装时 `plugins/job-radar` 是一个**真实目录**（拷过去的），
+    不是软链 → 自动关。
+
+    ## 为什么需要
+
+    **Python 模块一旦 import 就固定了** —— 改了源码，跑着的进程
+    还在用旧代码。本机踩过：加了 `.md` 支持，源文件改对了，
+    但插件 API 进程是 16:11 起的，它 import 的是 16:11 的版本，
+    于是用户看到「不支持的格式：.md」，而我看代码完全正确。
+
+    前端有 fs-watch 能热重载，**后端没有** —— 不加这个的话，
+    每改一次后端就要重启整个 Hermes。
+
+    ## 怎么关
+
+    环境变量 `JOB_RADAR_HOT_RELOAD=0` 显式关闭
+    （正式安装时也不需要 —— 目录不是软链，本来就是关的）。
+    """
+    flag = os.environ.get("JOB_RADAR_HOT_RELOAD", "").strip().lower()
+    if flag in ("0", "off", "false", "no"):
+        return False
+    if flag in ("1", "on", "true", "yes"):
+        return True
+    # 默认：插件目录是软链/junction → 开发模式
+    try:
+        if os.path.islink(_PLUGIN_ROOT):
+            return True
+        # junction 在 Windows 上 islink 为 False，用 realpath 判断
+        real = os.path.realpath(_PLUGIN_ROOT)
+        if real != os.path.abspath(_PLUGIN_ROOT):
+            return True
+        # plugins/ 目录本身是 junction（junction 指向仓库的 plugins 目录）
+        parent = os.path.dirname(_PLUGIN_ROOT)
+        if os.path.realpath(parent) != os.path.abspath(parent):
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def _reload_sibling(name: str):
+    """重新加载一个兄弟模块（源码变了的时候）。"""
+    import importlib.util
+
+    path = os.path.join(_PLUGIN_ROOT, name + ".py")
+    mod_name = _PKG_NAME + "." + name
+    try:
+        spec = importlib.util.spec_from_file_location(mod_name, path)
+        if spec is None or spec.loader is None:
+            return None
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[mod_name] = mod
+        spec.loader.exec_module(mod)
+        _SIBLING_MODULES[name] = mod
+        _SIBLING_MTIMES[name] = _module_mtime(name)
+        log.info("job-radar 模块 %s 已热重载", name)
+        return mod
+    except Exception as exc:      # noqa: BLE001
+        log.warning("job-radar 模块 %s 热重载失败: %s", name, exc)
+        return None
+
+
 def _sibling(name: str):
-    """取一个兄弟模块；取不到就抛，避免静默返回 None。"""
+    """取一个兄弟模块；取不到就抛，避免静默返回 None。
+
+    ## 开发模式热重载
+
+    **Python 模块一旦 import 就固定了** —— 改了源码，跑着的进程
+    还在用旧代码。本机踩过：加了 `.md` 支持，源文件改对了，
+    但插件 API 进程是 16:11 起的，它 import 的是 16:11 的版本，
+    于是用户看到「不支持的格式：.md」。
+
+    所以这里在**开发模式**下（`JOB_RADAR_HOT_RELOAD=1` + 插件目录是软链）
+    每次取模块都检查 mtime，变了就重新 import。
+    **正式环境默认关** —— 不该有意外的热重载行为。
+    """
+    if _dev_hot_reload():
+        mtime = _module_mtime(name)
+        if name in _SIBLING_MODULES and mtime != _SIBLING_MTIMES.get(name):
+            _reload_sibling(name)
+
     mod = _SIBLING_MODULES.get(name)
     if mod is None:
         raise ImportError(

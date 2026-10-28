@@ -399,6 +399,132 @@ class TestNoNestedScroll(unittest.TestCase):
                 + msg)
 
 
+class TestSdkComponentProps(unittest.TestCase):
+    """SDK 组件的 variant / size 必须在**合法名单**里。
+
+    ## 为什么需要这个
+
+    SDK 的 `Button` / `Badge` 用 cva（class-variance-authority）做变体：
+
+        variant: { default: 'bg-primary ...', outline: '...', ... }
+
+    **写一个不存在的 variant（比如 `primary`）不会报错** ——
+    cva 只是找不到对应项，然后**什么都不生成**。
+    结果：那个组件**没有任何样式类**，渲染出来是**裸文字**。
+
+    本机踩过两次：
+    - `Button variant: 'primary'` → 不存在（主按钮叫 `default`）
+      → 「识别并填写表单」按钮没有背景、没有边框、只有文字
+    - `Badge variant: 'soft'` → 不存在
+      → 简历标签也是裸文字
+
+    **代码完全正确、React 不报错、测试也过** ——
+    只是那个组件没拿到样式类。
+
+    ## 名单从哪来
+
+    Hermes 桌面 app 源码：
+      apps/desktop/src/components/ui/button.tsx  → buttonVariants
+      apps/desktop/src/components/ui/badge.tsx   → badgeVariants
+
+    **CI 上没有 app 源码**，所以名单写在这里。
+    升级 app 后如果 SDK 加了新 variant，这里要跟着加
+    （用到新 variant 时检查会报「不在名单里」，改名单即可）。
+    """
+
+    # Button 的合法 variant（button.tsx 的 buttonVariants）
+    BUTTON_VARIANTS = {
+        "default", "destructive", "outline", "secondary", "chip",
+        "ghost", "grip", "floating", "link", "text", "textStrong",
+    }
+    # Button 的合法 size
+    BUTTON_SIZES = {
+        "default", "xs", "sm", "lg", "inline", "micro", "icon", "grip",
+    }
+    # Badge 的合法 variant（badge.tsx 的 badgeVariants）
+    BADGE_VARIANTS = {
+        "default", "muted", "success", "warn", "destructive", "outline", "solid",
+    }
+
+    def _variants_for(self, component, src):
+        """抽出「某个 SDK 组件上用到的 variant 值」。
+
+        形如 `jsx(Badge, { ..., variant: 'muted', ... })`
+        """
+        out = []
+        for m in re.finditer(r"jsx\(\s*" + component + r"\s*,\s*\{", src):
+            # 从这个 { 开始做括号配平，截出完整的 props
+            i = m.end() - 1
+            depth = 0
+            k = i
+            while k < len(src):
+                if src[k] == "{":
+                    depth += 1
+                elif src[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            props = src[i:k + 1]
+            for vm in re.finditer(r"variant:\s*'([^']+)'", props):
+                out.append(vm.group(1))
+        return out
+
+    def test_button_variant_legal(self):
+        src = _read()
+        bad = [v for v in self._variants_for("Button", src)
+               if v not in self.BUTTON_VARIANTS]
+        self.assertEqual(
+            bad, [],
+            "Button 的 variant 不存在 —— cva 不会报错，但组件会没有样式：\n"
+            "  用了: %s\n"
+            "  合法: %s" % (sorted(set(bad)), sorted(self.BUTTON_VARIANTS)))
+
+    def test_button_size_legal(self):
+        src = _read()
+        bad = []
+        for m in re.finditer(r"jsx\(\s*Button\s*,\s*\{", src):
+            i = m.end() - 1
+            depth = 0
+            k = i
+            while k < len(src):
+                if src[k] == "{":
+                    depth += 1
+                elif src[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            props = src[i:k + 1]
+            for sm in re.finditer(r"size:\s*'([^']+)'", props):
+                if sm.group(1) not in self.BUTTON_SIZES:
+                    bad.append(sm.group(1))
+        self.assertEqual(bad, [], "Button 的 size 不存在：%s" % sorted(set(bad)))
+
+    def test_badge_variant_legal(self):
+        src = _read()
+        bad = [v for v in self._variants_for("Badge", src)
+               if v not in self.BADGE_VARIANTS]
+        self.assertEqual(
+            bad, [],
+            "Badge 的 variant 不存在 —— 标签会变成裸文字：\n"
+            "  用了: %s\n"
+            "  合法: %s" % (sorted(set(bad)), sorted(self.BADGE_VARIANTS)))
+
+    def test_no_primary_variant_anywhere(self):
+        """`primary` 不是任何 SDK 组件的 variant。
+
+        历史上踩过：Button 的主按钮叫 `default`。
+        """
+        src = _read()
+        for m in re.finditer(r"variant:\s*'primary'", src):
+            line = src[:m.start()].count("\n") + 1
+            self.fail(
+                "第 %d 行用了 variant 'primary' —— SDK 没有这个 variant，"
+                "cva 不会报错但组件会没有样式（裸文字）。\n"
+                "  Button 的主按钮是 variant: 'default'。" % line)
+
+
 class TestNoRelativeImports(unittest.TestCase):
     """只允许三个 specifier —— app 的加载器只认这三个。"""
 
