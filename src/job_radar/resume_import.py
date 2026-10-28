@@ -44,6 +44,23 @@ import os
 import re
 import zipfile
 
+# ── 加载诊断 ────────────────────────────────────────────────────────────────
+# 「代码改了但跑着的行为是旧的」这类问题，光看源码看不出来 ——
+# 得知道**进程实际加载的是哪份文件**。
+# 插件 API 跑在独立子进程里，日志不一定落盘，所以写文件最保险。
+try:
+    _home = os.environ.get("HERMES_HOME") or os.path.join(
+        os.environ.get("LOCALAPPDATA", ""), "hermes")
+    _diag = os.path.join(_home, "cache", "scratch")
+    os.makedirs(_diag, exist_ok=True)
+    with open(os.path.join(_diag, "job-radar-resume-import-load.txt"), "w",
+              encoding="utf-8") as _fh:
+        _fh.write("resume_import 加载自: %s\n支持格式: %s\n"
+                  % (os.path.abspath(__file__),
+                     "docx/pdf/txt/md" if ".md" in __doc__ else "旧版(无 md)"))
+except Exception:      # noqa: BLE001
+    pass
+
 # ── 文本抽取 ────────────────────────────────────────────────────────────────
 
 def extract_text(filename, data):

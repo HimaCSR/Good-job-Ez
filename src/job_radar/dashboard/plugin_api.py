@@ -183,16 +183,47 @@ def _log_load_summary() -> None:
     - 每个兄弟模块的 `__file__`（实际加载路径）
     - 开发模式热重载开没开
 
-    出问题时看一眼日志就知道是「加载了旧文件」还是「加载了别的目录」。
+    ## 为什么要写文件
+
+    **插件 API 跑在独立子进程里，它的日志不一定落到主日志。**
+    本机就遇到：加了加载摘要日志，重启后日志里什么都没有 ——
+    根本不知道是「没加载」还是「加载了但日志没落盘」。
+
+    所以**额外写一个诊断文件**（scratch 目录），保证一定能看到。
     """
     try:
         files = {}
         for name, mod in _SIBLING_MODULES.items():
             f = getattr(mod, "__file__", "?")
-            files[name] = os.path.basename(f or "?")
-        log.info("job-radar API 已加载：root=%s 热重载=%s 模块=%s",
-                 _PLUGIN_ROOT, _dev_hot_reload(),
-                 ",".join("%s:%s" % (k, v) for k, v in sorted(files.items())))
+            files[name] = f
+        summary = (
+            "job-radar API 已加载\n"
+            "  本文件      : %s\n"
+            "  插件根目录  : %s\n"
+            "  热重载      : %s\n"
+            "  模块来源    :\n%s\n"
+            % (
+                os.path.abspath(__file__),
+                _PLUGIN_ROOT,
+                _dev_hot_reload(),
+                "\n".join("    %-16s %s" % (k, v)
+                          for k, v in sorted(files.items())),
+            )
+        )
+        log.info("job-radar API 已加载：root=%s 热重载=%s",
+                 _PLUGIN_ROOT, _dev_hot_reload())
+
+        # **写诊断文件** —— 日志可能不落盘，文件一定看得到
+        try:
+            home = os.environ.get("HERMES_HOME") or os.path.join(
+                os.environ.get("LOCALAPPDATA", ""), "hermes")
+            diag_dir = os.path.join(home, "cache", "scratch")
+            os.makedirs(diag_dir, exist_ok=True)
+            with open(os.path.join(diag_dir, "job-radar-load.txt"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(summary)
+        except Exception as exc:      # noqa: BLE001
+            log.warning("job-radar 诊断文件写不出来: %s", exc)
     except Exception as exc:      # noqa: BLE001
         log.warning("job-radar 加载摘要打不出来: %s", exc)
 
