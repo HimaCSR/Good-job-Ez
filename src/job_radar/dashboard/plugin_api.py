@@ -67,6 +67,29 @@ def _load_siblings() -> Dict[str, Any]:
             continue
         mod_name = _PKG_NAME + "." + name
         if mod_name in sys.modules:
+            # **已经加载过了** ——
+            # 但那个模块可能是**旧版本**（别的插件先 import 了它，
+            # 或者 app 在别处加载了一份）。
+            #
+            # 本机踩过：新进程里 `job_radar.resume_import` 已经在
+            # sys.modules 里（旧的），于是新加的 `.md` 支持不生效 ——
+            # 用户看到「不支持的格式：.md（支持 .docx / .pdf / .txt）」，
+            # 而磁盘上的文件明明已经支持了。
+            #
+            # **改成总是从磁盘加载** —— 插件的兄弟模块之间没有
+            # 必须共享实例的场景，重新 import 是安全的。
+            log.info("job-radar 模块 %s 已在 sys.modules 中，"
+                     "从磁盘重新加载（%s）", name, path)
+            try:
+                spec = importlib.util.spec_from_file_location(mod_name, path)
+                if spec is not None and spec.loader is not None:
+                    mod = importlib.util.module_from_spec(spec)
+                    sys.modules[mod_name] = mod
+                    spec.loader.exec_module(mod)
+                    loaded[name] = mod
+                    continue
+            except Exception as exc:      # noqa: BLE001
+                log.warning("job-radar 模块 %s 重新加载失败: %s", name, exc)
             loaded[name] = sys.modules[mod_name]
             continue
         try:
@@ -147,6 +170,35 @@ def _dev_hot_reload() -> bool:
     except OSError:
         return False
     return False
+def _log_load_summary() -> None:
+    """启动时打一行「加载了哪些模块、从哪加载的」。
+
+    ## 为什么
+
+    「代码明明改了，但跑着的行为还是旧的」这类问题，
+    **光看源码永远看不出来** —— 得知道进程实际用的是哪份文件。
+
+    这行日志给出：
+    - 插件根目录（`_PLUGIN_ROOT`）
+    - 每个兄弟模块的 `__file__`（实际加载路径）
+    - 开发模式热重载开没开
+
+    出问题时看一眼日志就知道是「加载了旧文件」还是「加载了别的目录」。
+    """
+    try:
+        files = {}
+        for name, mod in _SIBLING_MODULES.items():
+            f = getattr(mod, "__file__", "?")
+            files[name] = os.path.basename(f or "?")
+        log.info("job-radar API 已加载：root=%s 热重载=%s 模块=%s",
+                 _PLUGIN_ROOT, _dev_hot_reload(),
+                 ",".join("%s:%s" % (k, v) for k, v in sorted(files.items())))
+    except Exception as exc:      # noqa: BLE001
+        log.warning("job-radar 加载摘要打不出来: %s", exc)
+
+
+# 启动时打一行加载摘要 —— 出问题第一眼看它
+_log_load_summary()
 
 
 def _reload_sibling(name: str):
@@ -192,6 +244,12 @@ def _sibling(name: str):
 
     mod = _SIBLING_MODULES.get(name)
     if mod is None:
+        # **字典里没有 → 试一次从磁盘加载** ——
+        # 新加的模块忘了加进 `_SIBLINGS` 时，至少还能用上
+        # （而不是直接抛 ImportError 让整个功能 500）。
+        loaded = _reload_sibling(name)
+        if loaded is not None:
+            return loaded
         raise ImportError(
             f"job-radar 兄弟模块 {name}.py 加载失败（{_PLUGIN_ROOT}）")
     return mod
