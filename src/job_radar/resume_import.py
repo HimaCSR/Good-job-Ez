@@ -1,4 +1,4 @@
-"""简历文件解析 —— 从 .docx / .pdf / .txt 里抽字段，填进画像表单。
+"""简历文件解析 —— 从 .docx / .pdf / .txt / .md 里抽字段，填进画像表单。
 
 ## 铁律
 
@@ -13,8 +13,17 @@
 | 格式 | 怎么读 | 精度 |
 | --- | --- | --- |
 | `.txt` | 直接读文本 | 最高 |
+| `.md` | **Markdown → 等价纯文本**（剥标记，保留结构） | 高 |
 | `.docx` | `zipfile` 读 `word/document.xml`，抽 `<w:t>` 文本 | 高 |
 | `.pdf` | 抽文本流里的 `(...) Tj` / `[...] TJ` | 中（版式复杂的会丢） |
+
+**`.md` 为什么不能当纯文本读**：标记会干扰字段识别 ——
+`# 工作经历` 让标题词匹配不上，`**姓名**：张三` 让抓到的是 `**姓名**`。
+所以专门做 `_read_markdown()`：**剥掉标记，保留结构**。
+
+**Markdown 特有的坑**：标题和内容之间的空行是 Markdown 语法，
+不是结构 —— 留着它，段落边界就丢了（「期望城市」和「杭州 / 上海」会变成两段）。
+所以标题后的空行要跳过，标题前的空行要保留。
 
 **`.pdf` 的局限**：真正的 PDF 文本抽取需要字体映射表，纯正则只能拿到
 大部分可读文本，遇到复杂排版会漏。抽不全就返回空，让用户知道
@@ -45,11 +54,136 @@ def extract_text(filename, data):
     ext = os.path.splitext(filename or "")[1].lower()
     if ext == ".txt":
         return _decode(data), ""
+    if ext == ".md" or ext == ".markdown":
+        return _read_markdown(data), ""
     if ext == ".docx":
         return _read_docx(data), ""
     if ext == ".pdf":
         return _read_pdf(data)
-    return "", "不支持的格式：%s（支持 .docx / .pdf / .txt）" % (ext or "未知")
+    return "", ("不支持的格式：%s（支持 .docx / .pdf / .txt / .md）"
+                % (ext or "未知"))
+
+
+def _read_markdown(data):
+    """从 .md 抽「等价纯文本」。
+
+    ## 为什么要专门处理
+
+    Markdown 不是纯文本 —— 标记会干扰字段识别：
+
+    | Markdown | 直接当纯文本会怎样 | 处理成 |
+    | --- | --- | --- |
+    | `# 工作经历` | 标题词变成 `# 工作经历`，`startswith("工作经历")` 匹配不上 | `工作经历` |
+    | `**姓名**：张三` | `_find_labeled` 抓到的值是 `**` + 姓名 | `姓名：张三` |
+    | `- Python` | 技能列表里混进 `-` | `Python` |
+    | 表格行（公司 | 职位） | 表格行切不成字段 | `公司 职位` |
+
+    **不是简单删标记** —— 删掉 `#` 会让标题行和正文行长得一样，
+    `_section_lines` 就找不到段落边界了。
+
+    所以这里的策略是：**剥掉标记，保留结构**。
+
+    表格单独处理 —— 简历里「公司 | 职位 | 起止」这种三列表格很常见，
+    转成「公司 职位 起止」一行，交给现有的字段抽取逻辑。
+    """
+    raw = _decode(data)
+    lines = raw.splitlines()
+    out = []
+    in_table = False
+    after_heading = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # **标题后的空行要跳过** ——
+        # Markdown 里「## 标题」和内容之间的空行是语法，不是结构。
+        # 留着它，「期望城市」和「杭州 / 上海」就变成两段，
+        # 段落边界丢了，取不到值。
+        if not stripped:
+            if after_heading:
+                after_heading = False
+                continue
+            out.append("")
+            continue
+
+        # 围栏代码块 —— 里面的内容不是简历正文，跳过
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_table = False
+            out.append("")
+            continue
+
+        # 表格行
+        if stripped.startswith("|"):
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            # 跳过分隔行（三个或更多的横杠）
+            if all(re.match(r"^:?-{2,}:?$", c or "-") for c in cells):
+                continue
+            # **保留 | 分隔** —— 经历解析器认的就是「公司 | 职位 | 起止」。
+            # 换成空格的话，每格里的空格（职位名常带空格）就分不清了。
+            out.append(" | ".join(c for c in cells if c))
+            in_table = True
+            continue
+        in_table = False
+
+        # 标题：去掉 # 号，保留标题文字
+        m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
+        if m:
+            # **标题前空一行** —— 标题和它下面的内容要在同一段里
+            # （_paragraphs 靠空行切段）。标题后的空行由上面的
+            # after_heading 分支跳过。
+            out.append("")
+            out.append(m.group(2).strip())
+            after_heading = True
+            continue
+
+        # 列表项：去掉 - / * / + 和数字编号
+        m = re.match(r"^[-*+]\s+(.*)$", stripped)
+        if m:
+            out.append(m.group(1).strip())
+            continue
+        m = re.match(r"^\d+[.)]\s+(.*)$", stripped)
+        if m:
+            out.append(m.group(1).strip())
+            continue
+
+        # 引用块
+        m = re.match(r"^>\s?(.*)$", stripped)
+        if m:
+            out.append(m.group(1).strip())
+            continue
+
+        # 行内标记：**粗体** / *斜体* / `代码` / ~~删除线~~
+        # **保留文字，去掉标记本身**
+        out.append(_strip_inline(stripped))
+
+    # 收尾：连续空行压成一个
+    text = "\n".join(out)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _strip_inline(text):
+    """去掉行内 Markdown 标记，保留文字。
+
+    `**姓名**` → `姓名`（不是 `**` + 姓名）
+    """
+    t = text
+    # 删除线
+    t = re.sub(r"~~(.*?)~~", r"\1", t)
+    # 粗体 / 斜体（**xx** / __xx__ / *xx* / _xx_）
+    t = re.sub(r"\*\*(.*?)\*\*", r"\1", t)
+    t = re.sub(r"__(.*?)__", r"\1", t)
+    t = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", t)
+    t = re.sub(r"(?<!_)_([^_]+)_(?!_)", r"\1", t)
+    # 行内代码
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    # 链接：[文字](地址) → 文字
+    t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    # 图片
+    t = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", t)
+    # 水平线
+    t = re.sub(r"^([-*_])\1{2,}$", "", t)
+    return t.strip()
 
 
 def _decode(data):
@@ -371,6 +505,13 @@ def parse_experiences(text):
             if len(parts) >= 2:
                 current["company"] = parts[0]
                 current["title"] = parts[1]
+                # **第三段往后是描述** ——
+                # 「公司 | 职位 | 起止 | 描述」这种单行写法（Markdown 表格、
+                # 一些 Word 表格导出）描述就在同一行里，不拆出来就没 bullet，
+                # 而没有 bullet 的经历会被当成误判丢掉。
+                rest = [x for x in parts[2:] if x]
+                if rest:
+                    current["bullets"].extend(rest)
             elif parts:
                 current["title"] = parts[0]
             continue
@@ -394,46 +535,81 @@ def parse_experiences(text):
     return out[:12]
 
 
+def _labeled_value(lines, pattern, max_len=40, paragraphs=None):
+    """找「标签 + 值」，**值可以在同一行，也可以在后面几行**。
+
+    两种写法都要认：
+
+        期望城市：杭州            ← 同行
+        期望城市                  ← 后面跟几行（Markdown 列表、Word 表格转出来的）
+          杭州
+          上海
+
+    paragraphs 给了的话，值在下一行时**取整段** ——
+    这样「杭州 / 上海」两个城市不会只拿到第一个。
+    """
+    paras = paragraphs if paragraphs is not None else []
+    for i, line in enumerate(lines):
+        m = re.search(pattern, line)
+        if not m:
+            continue
+        raw = m.group(1).strip()
+        if raw:
+            return raw[:max_len]
+        # 同行没有值 → 取下一段的内容
+        for para in paras:
+            if line in para:
+                # 「期望城市」这一段里，除去标题行，剩下的就是值
+                rest = [x.strip() for x in para.split("\n")
+                        if x.strip() and x.strip() != line.strip()]
+                if rest:
+                    return " ".join(rest)[:max_len]
+                break
+        # 没有段落信息 → 只看下一行
+        if i + 1 < len(lines):
+            nxt = lines[i + 1].strip()
+            if not re.match(r"^(教育|自我评价|获奖|证书|项目|工作|实习|联系"
+                            r"|基本|求职|技能|专业|期望|意向)", nxt):
+                return nxt[:max_len]
+    return ""
+
+
 def parse_expectations(text):
     """抽期望条件：城市 / 岗位方向 / 最低薪资。"""
     out = {}
     lines = _lines(text)
+    paras = _paragraphs(text)
 
     # 城市：找「意向城市 / 期望城市 / 城市」
-    for line in lines:
-        m = re.search(r"(?:意向|期望|目标|所在)?城市\s*[:：]?\s*(.{0,40})", line)
-        if m:
-            raw = m.group(1)
-            cities = [c.strip() for c in re.split(r"[,，、/|｜\s]+", raw) if c.strip()]
-            cities = [c for c in cities if c not in ("不限", "无", "全国", "/")][:6]
-            if cities:
-                out["cities"] = cities
-            break
+    raw = _labeled_value(lines, r"(?:意向|期望|目标|所在)?城市\s*[:：]?\s*(.{0,40})",
+                         paragraphs=paras)
+    if raw:
+        cities = [c.strip() for c in re.split(r"[,，、/|｜\s]+", raw) if c.strip()]
+        cities = [c for c in cities if c not in ("不限", "无", "全国", "/")][:6]
+        if cities:
+            out["cities"] = cities
 
     # 岗位方向：找「求职意向 / 意向岗位 / 期望职位」
-    for line in lines:
-        m = re.search(r"(?:求职意向|意向岗位|期望职位|应聘岗位|目标岗位)\s*[:：]?\s*(.{0,40})", line)
-        if m:
-            raw = m.group(1)
-            kws = [k.strip() for k in re.split(r"[,，、/|｜\s]+", raw) if k.strip()]
-            kws = [k for k in kws if k not in ("无", "不限", "/")][:6]
-            if kws:
-                out["title_keywords"] = kws
-            break
+    raw = _labeled_value(
+        lines, r"(?:求职意向|意向岗位|期望职位|应聘岗位|目标岗位)\s*[:：]?\s*(.{0,40})",
+        paragraphs=paras)
+    if raw:
+        kws = [k.strip() for k in re.split(r"[,，、/|｜\s]+", raw) if k.strip()]
+        kws = [k for k in kws if k not in ("无", "不限", "/")][:6]
+        if kws:
+            out["title_keywords"] = kws
 
     # 最低薪资：找「期望薪资 / 薪资要求」
-    for line in lines:
-        m = re.search(r"(?:期望|意向|最低)?薪资(?:要求|期望)?\s*[:：]?\s*(.{0,20})", line)
-        if m:
-            raw = m.group(1)
-            nums = re.findall(r"(\d+)\s*[kK]", raw)
+    raw = _labeled_value(lines, r"(?:期望|意向|最低)?薪资(?:要求|期望)?\s*[:：]?\s*(.{0,20})",
+                         paragraphs=paras)
+    if raw:
+        nums = re.findall(r"(\d+)\s*[kK]", raw)
+        if nums:
+            out["min_salary"] = int(nums[0])
+        else:
+            nums = re.findall(r"(\d{4,6})\s*元", raw)
             if nums:
-                out["min_salary"] = int(nums[0])
-            else:
-                nums = re.findall(r"(\d{4,6})\s*元", raw)
-                if nums:
-                    out["min_salary"] = int(nums[0]) // 1000
-            break
+                out["min_salary"] = int(nums[0]) // 1000
 
     return out
 

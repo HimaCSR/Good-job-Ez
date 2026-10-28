@@ -496,10 +496,10 @@ function ResumeImportPanel({ ctx, onDraft }) {
         jsx('span', { className: 'text-sm text-(--ui-text-primary)',
           children: file ? file.name : '拖入或点击选择简历文件' }),
         jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-          children: '支持 .docx / .pdf / .txt · 解析在本机完成，文件不会离开这台电脑' }),
+          children: '支持 .docx / .pdf / .txt / .md · 解析在本机完成，文件不会离开这台电脑' }),
         jsx('input', {
           type: 'file',
-          accept: '.docx,.pdf,.txt',
+          accept: '.docx,.pdf,.txt,.md,.markdown',
           className: 'hidden',
           onChange: (e) => {
             const f = e.target.files && e.target.files[0]
