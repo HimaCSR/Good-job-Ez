@@ -67,6 +67,56 @@ function Panel({ title, hint, actions, children, bodyClass }) {
 // 标签编辑器：可增删的 chips
 function ChipEditor({ value, onChange, placeholder, addLabel }) {
   const list = Array.isArray(value) ? value : []
+  // **不用 window.prompt** ——
+  // Electron 渲染进程里 `window.prompt()` 被禁用了（安全策略），
+  // 调用它不会弹窗（或者直接抛错）→ 「＋ 添加技能」点了没反应。
+  //
+  // 改成**内联输入**：点「＋」出现一个小输入框，回车/点「添加」确认。
+  const [adding, setAdding] = React.useState(false)
+  const [draft, setDraft] = React.useState('')
+
+  const commit = () => {
+    const v = draft.trim()
+    if (v) onChange([...list, v])
+    setDraft('')
+    setAdding(false)
+  }
+
+  const addBtn = jsx('button', {
+    type: 'button',
+    className: 'rounded-full border border-dashed border-(--ui-stroke-tertiary) px-2.5 py-0.5 text-xs text-(--ui-text-tertiary) hover:border-(--ui-accent) hover:text-(--ui-accent)',
+    onClick: () => { setAdding(true); setDraft('') },
+    children: '＋ ' + (addLabel || '添加'),
+  })
+
+  const input = adding ? jsxs('span', {
+    className: 'inline-flex items-center gap-1',
+    children: [
+      jsx(Input, {
+        value: draft,
+        placeholder: placeholder || (addLabel || '输入内容'),
+        onChange: (e) => setDraft(e.target.value),
+        onKeyDown: (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+          if (e.key === 'Escape') { setDraft(''); setAdding(false) }
+        },
+        className: 'h-6 w-36 text-xs',
+      }),
+      jsx('button', {
+        type: 'button',
+        className: 'rounded border border-(--ui-stroke-tertiary) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-secondary)',
+        onClick: commit,
+        children: '添加',
+      }),
+      jsx('button', {
+        type: 'button',
+        className: 'rounded px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary)',
+        onClick: () => { setDraft(''); setAdding(false) },
+        children: '取消',
+      }),
+    ],
+  }) : null
+
   return jsxs('div', {
     className: 'flex flex-wrap items-center gap-1.5',
     children: [
@@ -83,15 +133,8 @@ function ChipEditor({ value, onChange, placeholder, addLabel }) {
           }),
         ],
       })),
-      jsx('button', {
-        type: 'button',
-        className: 'rounded-full border border-dashed border-(--ui-stroke-tertiary) px-2.5 py-0.5 text-xs text-(--ui-text-tertiary) hover:border-(--ui-accent) hover:text-(--ui-accent)',
-        onClick: () => {
-          const v = globalThis.prompt(addLabel || '输入内容')
-          if (v && v.trim()) onChange([...list, v.trim()])
-        },
-        children: '＋ ' + (addLabel || '添加'),
-      }),
+      input,
+      adding ? null : addBtn,
     ],
   })
 }
@@ -102,6 +145,11 @@ function useConfig(ctx) {
   return useQuery({
     queryKey: ['job-radar', 'config'],
     queryFn: async () => ctx.rest('/config'),
+    // **staleTime 不为 0** ——
+    // 默认 0 意味着「每次窗口聚焦/重挂载都重新取数」，
+    // 取回来的 data 是**新对象** → 下游 `profile` 引用变了 →
+    // `useEffect` 重置本地编辑 → **用户输入被冲掉**。
+    staleTime: 30_000,
   })
 }
 
@@ -460,12 +508,39 @@ function ProfileView({ ctx, cfg, onSaved }) {
     onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
   })
 
+  // **profile 的引用必须稳定** ——
+  //
+  // `(cfg && cfg.profile) || {}` 在 profile 不存在时每次渲染都是**新对象**，
+  // 而 useQuery 的 data 引用也可能随重新取数变化。
+  // 后果：`React.useEffect(() => setLocal(profile), [profile])`
+  // **每次渲染都跑** → 用户刚输入的值立刻被服务端旧值覆盖回去
+  // → 表现就是「输入框里打不进字」。
+  //
+  // 修法：**用内容的字符串签名当依赖**，内容没变就不重置用户输入。
+  const profileKey = React.useMemo(
+    () => { try { return JSON.stringify(profile || {}) } catch (e) { return '' } },
+    [profile]
+  )
   const [local, setLocal] = React.useState(profile)
-  React.useEffect(() => { setLocal(profile) }, [profile])
+  const lastKey = React.useRef(profileKey)
+  React.useEffect(() => {
+    // 只有**服务端数据真的变了**才重置本地编辑
+    if (profileKey !== lastKey.current) {
+      lastKey.current = profileKey
+      setLocal(profile)
+    }
+  }, [profileKey, profile])
 
   const set = (k, v) => setLocal((s) => ({ ...s, [k]: v }))
   const identity = local.identity || {}
-  const setIdentity = (k, v) => set((s) => ({ ...s, identity: { ...(s.identity || {}), [k]: v } }))
+  // **set 的第一个参数是键名** ——
+  // 之前这里写的是 `set((s) => ...)`，把**函数**当成键名传进去了，
+  // 于是 `local.identity` 根本没被改 → **姓名/电话/邮箱/学历/院校/专业
+  // 六个字段全都打不进字**（症状：输入框里怎么敲都是空的）。
+  const setIdentity = (k, v) => setLocal((s) => ({
+    ...s,
+    identity: { ...(s.identity || {}), [k]: v },
+  }))
 
   if (!profile || !Object.keys(profile).length) {
     return jsx(ErrorState, { message: '读不到个人画像' })

@@ -64,6 +64,35 @@ def _read():
         return fh.read()
 
 
+def _strip_comments(src):
+    """去掉行注释和块注释（保持行数不变，方便对行号）。"""
+    out = []
+    in_block = False
+    for line in src.split("\n"):
+        if in_block:
+            out.append("")
+            if "*/" in line:
+                in_block = False
+            continue
+        stripped = line.strip()
+        if stripped.startswith("/*"):
+            if "*/" not in line:
+                in_block = True
+            out.append("")
+            continue
+        # 行内块注释
+        cleaned = re.sub(r"/\*.*?\*/", "", line)
+        # 行注释（不在字符串里的 —— 简单处理，引号内不动）
+        m = re.search(r"(['\"])(.*?)\1", cleaned)
+        if m:
+            head = cleaned[:m.start()]
+            cleaned = head + cleaned[m.start():]
+        else:
+            cleaned = cleaned.split("//")[0]
+        out.append(cleaned)
+    return "\n".join(out)
+
+
 def _functions(src):
     """切出每个顶层函数：(名字, 函数体)。"""
     out = []
@@ -348,6 +377,132 @@ class TestNoUndefinedIdentifiers(unittest.TestCase):
             self.fail(
                 "这些标识符在整个文件里从没被定义过"
                 "（渲染时会 ReferenceError 崩掉）：\n" + msg)
+
+
+class TestSetterCallSignatures(unittest.TestCase):
+    """「键值 setter」不能把**函数**当键名传进去。
+
+    ## 本机踩过的坑
+
+        const set = (k, v) => setLocal((s) => ({ ...s, [k]: v }))
+        const setIdentity = (k, v) => set((s) => ({ ...s, identity: {...} }))
+                                           ^ 函数，不是键名
+
+    `set` 的第一个参数是**键名**。传函数进去 → 键变成函数源码
+    → `local.identity` 根本没被改 → **姓名/电话/邮箱/学历/院校/专业
+    六个字段全都打不进字**（用户看到的就是「输入框里怎么敲都是空的」）。
+
+    **代码完全正常、React 不报错、onChange 也确实被调用了** ——
+    只是值被塞进了一个奇怪的键。
+
+    ## 为什么静态检查能抓
+
+    这种写法的特征很明显：`set(` / `setXxx(` 的第一个参数是
+    `(` 或 `=>` 开头的函数表达式。真正的键名是字符串或标识符。
+
+    ## 顺带
+
+    `window.prompt()` 在 **Electron 渲染进程里被禁用** ——
+    调用它不弹窗。插件里不能依赖它（要有输入框）。
+    """
+
+    # 形如 `const setXxx = (k, v) => ...` 的 setter
+    SETTER_RE = re.compile(
+        r"const\s+(set\w*)\s*=\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)\s*=>")
+
+    def _setters(self):
+        src = _read()
+        out = []
+        for m in self.SETTER_RE.finditer(src):
+            out.append({
+                "name": m.group(1),
+                "key_param": m.group(2),
+                "line": src[:m.start()].count("\n") + 1,
+            })
+        return out
+
+    def _definition_lines(self):
+        """setter 名字 → 它的**定义行集合**。
+
+        排除定义行时，要看「这一行是不是**这个 setter 自己**的定义」——
+        不能用所有 setter 定义行的并集。
+
+        **为什么**：bug 恰好长这样 ——
+
+            const setIdentity = (k, v) => set((s) => ({ ... }))
+
+        `set(...)` 在 `setIdentity` 的**定义行**上。
+        如果用并集排除，这行会被当成「set 的定义行」跳过 → **漏报**。
+        """
+        src = _read()
+        out = {}
+        for s in self._setters():
+            out.setdefault(s["name"], set()).add(s["line"])
+        return out
+
+    def test_found_setters(self):
+        setters = self._setters()
+        self.assertTrue(setters, "没找到 setter —— 检查脚本本身是不是坏了")
+
+    def test_setter_not_called_with_function(self):
+        """setter 的调用处，第一个参数不能是函数。"""
+        src = _read()
+        # **先剥掉注释** —— 注释里写 `set((s) => ...)` 是解释旧 bug 的，
+        # 不是真的调用。不剥会误报。
+        src = _strip_comments(src)
+        def_lines = self._definition_lines()
+        bad = []
+        for setter in self._setters():
+            name = setter["name"]
+            own_defs = def_lines.get(name, set())
+            # `name(` 的调用点（排除定义本身）
+            pattern = re.compile(r"\b" + re.escape(name) + r"\s*\(")
+            for m in pattern.finditer(src):
+                line = src[:m.start()].count("\n") + 1
+                if line in own_defs:
+                    continue        # 这个 setter 自己的定义处
+                # 取第一个参数
+                i = m.end()
+                depth = 1
+                arg_start = i
+                while i < len(src) and depth > 0:
+                    c = src[i]
+                    if c in "([{":
+                        depth += 1
+                    elif c in ")]}":
+                        depth -= 1
+                        if depth == 0:
+                            break
+                    i += 1
+                arg = src[arg_start:i].strip()
+                # 第一个参数是函数 → 键名传错
+                if arg.startswith("(") or arg.startswith("=>") \
+                        or arg.startswith("function"):
+                    bad.append((name, line, arg[:60]))
+        self.assertEqual(
+            bad, [],
+            "这些 setter 的第一个参数是**函数**，但它要的是键名 —— "
+            "值会被塞进一个奇怪的键，界面上完全看不出来：\n"
+            + "\n".join("  %s 第 %d 行: %s" % (n, ln, a) for n, ln, a in bad))
+
+    def test_no_window_prompt(self):
+        """插件里不能用 `window.prompt` —— Electron 渲染进程里被禁用。
+
+        调用它不会弹窗 → 「＋ 添加技能」点了没反应，
+        而且**不报任何错**。
+        """
+        src = _read()
+        code = "\n".join(l for l in src.split("\n")
+                         if not l.strip().startswith("//"))
+        hits = []
+        for m in re.finditer(r"(?:globalThis|window)\s*\.\s*prompt\s*\(", code):
+            line = code[:m.start()].count("\n") + 1
+            hits.append(line)
+        self.assertEqual(
+            hits, [],
+            "这些行用了 window.prompt（第 %s 行）—— "
+            "Electron 渲染进程里它被禁用，点了没反应也不报错。"
+            "改成内联输入框。" % hits)
 
 
 class TestNoNestedScroll(unittest.TestCase):

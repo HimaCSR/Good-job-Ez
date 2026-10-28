@@ -55,27 +55,31 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/6 单元测试 ==="
+    say "=== 1/7 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/6 桌面端 JS 语法 ==="
+    say "=== 2/7 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/6 桌面端 CSS 类存在性 ==="
+    say "=== 3/7 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/6 桌面端 jsx children 位置 ==="
+    say "=== 4/7 桌面端 jsx children 位置 ==="
     cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
 
     say ""
-    say "=== 5/6 脱敏扫描 ==="
+    say "=== 5/7 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 6/6 仓库卫生 ==="
+    say "=== 6/7 桌面端表单交互 ==="
+    cmd_check_form_input || die "桌面端表单输入有问题（打字打不进去 / 技能加不上）"
+
+    say ""
+    say "=== 7/7 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
 
     ok "全部检查通过"
@@ -110,6 +114,39 @@ cmd_check_jsx_children() {
     [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
     if [ -z "$node_exe" ]; then
         warn "找不到 node，跳过桌面端 jsx 检查"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$target"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$target")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
+}
+
+# 桌面端表单的**真实交互**验证 ——
+# 用 jsdom + React 真的渲染 ProfileView，真的打字。
+#
+# **为什么必须这样测**：
+# 「输入框打不进字」这类问题在代码层完全看不出来 ——
+# JS 语法对、React 对、onChange 也确实被调用了，
+# 但值就是进不去（`setIdentity` 把函数当键名传给了 `set`）。
+cmd_check_form_input() {
+    local checker="$SCRIPT_DIR/verify-form-input.mjs"
+    local target="$PLUGIN_DIR/desktop/plugin.js"
+    [ -f "$checker" ] || { warn "找不到 verify-form-input.mjs，跳过"; return 0; }
+    [ -f "$target" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过桌面端表单检查"
         return 0
     fi
 
