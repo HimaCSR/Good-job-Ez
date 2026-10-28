@@ -69,7 +69,12 @@ body {
 .item-title { font-weight: 650; font-size: 12.5px; }
 .item-meta { font-size: 11px; color: #666; margin-left: auto; }
 .bullets { margin-top: 3px; padding-left: 15px; }
-.bullets li { font-size: 12px; margin-bottom: 2px; }
+.bullets li {
+  font-size: 12px; margin-bottom: 2px;
+  /* 中文没有词边界 —— 不加这个，「分钟」会被拆成「分」「钟」。
+     line-break: strict 按词断行；overflow-wrap 兜底长英文不溢出。 */
+  line-break: strict; overflow-wrap: break-word;
+}
 .bullets .basis {
   color: #8a6410; font-size: 10.5px; margin-left: 4px;
 }
@@ -93,6 +98,9 @@ body {
 </head>
 <body class="{% if show_basis %}show-basis{% endif %}">
 <div class="page">
+  {# 图片模板：底图铺在文字层下面 #}
+  {% if bg_image %}<div class="bg-image" style="background-image: url('{{ bg_image }}')"></div>{% endif %}
+  <div class="content">
   <div class="head">
     <div class="name">{{ identity.name or "姓名" }}</div>
     {% if identity.headline %}<div class="sub">{{ identity.headline }}</div>{% endif %}
@@ -148,6 +156,7 @@ body {
     {% endif %}
   </div>
   {% endfor %}
+  </div>
 </div>
 </body>
 </html>
@@ -226,10 +235,40 @@ def get_builtin(template_id):
     return tpl["css"] if tpl else None
 
 
+def _uploaded_css(template_id):
+    """读上传模板的 CSS 片段；不是上传模板返回 None。
+
+    **上传的模板和内置模板是同一个形态**：一份 CSS 片段，
+    渲染时套进同一份 HTML 骨架。
+    这样「缩略图 = 实际输出」自动成立 —— 不需要两套渲染逻辑。
+    """
+    path = os.path.join(TEMPLATES_DIR, template_id + ".css")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def uploaded_bg_image(template_id):
+    """上传模板的底图（图片模板才有）—— 返回 data URI 或 None。"""
+    path = os.path.join(TEMPLATES_DIR, template_id + ".bg")
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as fh:
+        raw = fh.read()
+    if not raw:
+        return None
+    import base64
+    ext = os.path.splitext(path)[1].lower().lstrip(".") or "png"
+    mime = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "webp": "image/webp"}.get(ext, "image/png")
+    return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
+
+
 def render_html(template_id, context):
     """渲染一份简历 HTML。
 
-    template_id: 内置 id，或用户上传转换出来的模板 id（读 <templates>/<id>.html）
+    template_id: 内置 id，或用户上传转换出来的模板 id
     context:     {'title','identity','sections'} —— sections 每项：
                   {title, kind, paragraphs|bullets|tags|entries}
                   bullets/entries 的项：{text, basis}
@@ -238,21 +277,14 @@ def render_html(template_id, context):
 
     css = get_builtin(template_id)
     if css is None:
-        # 用户上传转换的模板：整个 HTML 文件自带样式，直接用它
-        path = os.path.join(TEMPLATES_DIR, template_id + ".html")
-        if not os.path.exists(path):
-            raise FileNotFoundError("模板不存在: %s" % template_id)
-        with open(path, encoding="utf-8") as fh:
-            html = fh.read()
-        # 上传的模板也是「同一份骨架 + 自己的 CSS」→ 用同样的上下文渲染
-        from jinja2 import Template as T
-        ctx = dict(context)
-        ctx.setdefault("show_basis", False)
-        return T(html).render(**ctx)
+        css = _uploaded_css(template_id)
+    if css is None:
+        raise FileNotFoundError("模板不存在: %s" % template_id)
 
     ctx = dict(context)
     ctx["style"] = css
     ctx.setdefault("show_basis", False)
+    ctx.setdefault("bg_image", uploaded_bg_image(template_id))
     return Template(_SKELETON).render(**ctx)
 
 
@@ -262,7 +294,7 @@ def template_info(template_id):
     if tpl:
         return {"template_id": template_id, "name": tpl["name"],
                 "description": tpl["description"], "builtin": True}
-    path = os.path.join(TEMPLATES_DIR, template_id + ".html")
+    path = os.path.join(TEMPLATES_DIR, template_id + ".css")
     if os.path.exists(path):
         return {"template_id": template_id, "name": template_id,
                 "description": "上传的模板", "builtin": False}
@@ -273,11 +305,11 @@ def list_all():
     """全部可用模板（内置 + 上传的）。
 
     **两个来源都要收**：
-    - TEMPLATES_DIR 里的 .html 文件（真正的模板实现）
+    - TEMPLATES_DIR 里的 .css 文件（上传转换出来的 CSS 片段）
     - SQLite 的 resume_templates 表（上传转换时登记的记录）
 
-    只扫目录会漏掉「已登记但还没生成 HTML」的模板 ——
-    上传转换是两步：先登记，再生成 HTML。第二步没做完时，
+    只扫目录会漏掉「已登记但还没生成文件」的模板 ——
+    上传转换是两步：先登记，再落文件。第二步没做完时，
     模板在库里但不在目录里，列表就少了它。
     """
     out = [template_info(t) for t in BUILTIN]
@@ -285,9 +317,9 @@ def list_all():
 
     if os.path.isdir(TEMPLATES_DIR):
         for name in sorted(os.listdir(TEMPLATES_DIR)):
-            if not name.endswith(".html"):
+            if not name.endswith(".css"):
                 continue
-            tid = name[:-5]
+            tid = name[:-4]
             if tid in seen:
                 continue
             info = template_info(tid)

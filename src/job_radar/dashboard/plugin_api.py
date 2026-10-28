@@ -1076,31 +1076,43 @@ def delete_experience(exp_id: str) -> Dict[str, Any]:
 
 @router.post("/templates/convert")
 def convert_template(body: Dict[str, Any]) -> Dict[str, Any]:
-    """上传模板文件 → 转成 HTML 模板 → 入库。
+    """上传模板文件 → 转成 CSS 模板 → 落盘 + 入库。
 
-    body: {filename, data_base64, kind?}
+    body: {filename, data_base64, kind?, name?, description?, dry_run?}
+
+    **转换全在本机完成，不调大模型** —— 简历内容不外传。
+    .docx 走 zipfile+XML 抽版式参数，.pdf 抽页面尺寸，
+    图片走「底图 + 文字层」。
     """
-    mock = _mock()
     filename = body.get("filename") or ""
     if not filename:
         return {"ok": False, "error": "缺少文件名"}
-    result = mock.convert_template(filename, body.get("data_base64"),
-                                   body.get("kind"))
+
+    store = _sibling("template_store")
+    result = store.save_upload(
+        filename,
+        body.get("data_base64"),
+        kind=body.get("kind"),
+        name=body.get("name"),
+        description=body.get("description"),
+        dry_run=bool(body.get("dry_run")),
+    )
     if not result.get("ok"):
         return result
+    return {
+        "ok": True,
+        "template": result["template"],
+        "extracted": result.get("extracted") or [],
+        "note": result.get("note") or "",
+        "css_preview": result.get("css_preview") or "",
+    }
 
-    tpl = dict(result["template"])
-    storage = _sibling("storage")
-    try:
-        storage.upsert_template({
-            "template_id": tpl["template_id"],
-            "name": tpl["name"],
-            "description": tpl.get("description", ""),
-            "format": tpl.get("format", "docx"),
-            "source_path": tpl.get("source_path", ""),
-            "preview_path": tpl.get("preview_path", ""),
-            "builtin": 0,
-        })
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-    return {"ok": True, "template": tpl, "mock": True}
+
+@router.post("/templates/delete")
+def delete_template(body: Dict[str, Any]) -> Dict[str, Any]:
+    """删掉一个上传的模板（内置的不给删）。"""
+    tid = body.get("template_id") or ""
+    if not tid:
+        return {"ok": False, "error": "缺少 template_id"}
+    store = _sibling("template_store")
+    return store.remove_upload(tid)

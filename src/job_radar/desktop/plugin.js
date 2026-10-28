@@ -2075,7 +2075,40 @@ function ResumeView({ ctx, cfg }) {
         setConvertMsg((r && r.error) || '转换失败')
         return
       }
-      setConvertMsg('已加入模板库：' + ((r.template && r.template.name) || file.name))
+      // 把「抽到了什么」告诉用户 —— 转换不是黑盒
+      const extracted = (r.extracted || []).join('、')
+      const name = (r.template && r.template.name) || file.name
+      setConvertMsg(
+        (r.note ? r.note + ' ' : '')
+        + '已加入模板库：' + name
+        + (extracted ? '（识别到：' + extracted + '）' : ''))
+      qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
+    } catch (err) {
+      setConvertMsg(String((err && err.message) || err))
+    } finally {
+      setConverting(false)
+    }
+  }
+
+  // 删掉一个上传的模板（内置模板不给删）
+  const onDeleteTemplate = async (tpl) => {
+    if (!tpl || !tpl.template_id) return
+    if (tpl.builtin || tpl.format === 'builtin') {
+      setConvertMsg('内置模板不能删')
+      return
+    }
+    setConverting(true)
+    setConvertMsg('正在删除 ' + (tpl.name || '') + ' …')
+    try {
+      const r = await ctx.rest('/templates/delete', {
+        method: 'POST',
+        body: { template_id: tpl.template_id },
+      })
+      if (!r || r.ok === false) {
+        setConvertMsg((r && r.error) || '删除失败')
+        return
+      }
+      setConvertMsg('已删除：' + (tpl.name || tpl.template_id))
       qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
     } catch (err) {
       setConvertMsg(String((err && err.message) || err))
@@ -2125,6 +2158,10 @@ function ResumeView({ ctx, cfg }) {
             tpl,
             active: picked.includes(tpl.template_id),
             onToggle: () => toggle(tpl.template_id),
+            // 只有上传的模板能删
+            onDelete: (tpl.builtin || tpl.format === 'builtin')
+              ? null
+              : () => onDeleteTemplate(tpl),
           })).concat([
             jsx('button', {
               key: '__upload',
@@ -2212,21 +2249,23 @@ function ResumeView({ ctx, cfg }) {
 }
 
 /** 模板卡 —— 内置模板画一个迷你预览缩略图，上传模板用文件名。 */
-function TemplateCard({ tpl, active, onToggle }) {
+function TemplateCard({ tpl, active, onToggle, onDelete }) {
   const builtin = tpl.builtin || tpl.format === 'builtin'
-  return jsxs('button', {
-    type: 'button',
-    onClick: onToggle,
+  // **外层是 div 不是 button** —— 上传的模板要在角上放「删除」按钮，
+  // button 里套 button 是非法 HTML，浏览器会拆掉结构导致点击错位。
+  return jsxs('div', {
     className: cn(
-      'flex flex-col overflow-hidden rounded-lg border text-left transition-colors',
+      'group relative flex flex-col overflow-hidden rounded-lg border text-left transition-colors',
       active
         ? 'border-(--ui-stroke-tertiary) ring-1 ring-(--ui-stroke-tertiary)'
         : 'border-(--ui-stroke-tertiary) hover:border-(--ui-stroke-tertiary)'
     ),
     children: [
-      jsx('div', {
+      jsx('button', {
+        type: 'button',
+        onClick: onToggle,
         className: cn(
-          'relative flex h-24 items-center justify-center bg-(--ui-bg-elevated)',
+          'relative flex h-24 w-full items-center justify-center bg-(--ui-bg-elevated)',
           !active && 'opacity-60'
         ),
         children: [
@@ -2253,10 +2292,23 @@ function TemplateCard({ tpl, active, onToggle }) {
           }),
         ],
       }),
-      jsxs('div', { className: 'px-2.5 py-2', children: [
-        jsx('div', { className: 'text-xs font-medium', children: tpl.name }),
-        jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.description || '' }),
-      ]}),
+      jsx('button', {
+        type: 'button',
+        onClick: onToggle,
+        className: 'px-2.5 py-2 text-left',
+        children: [
+          jsx('div', { className: 'text-xs font-medium', children: tpl.name }),
+          jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.description || '' }),
+        ],
+      }),
+      // 删除按钮 —— 只有上传的模板能删，内置模板没有
+      onDelete ? jsx('button', {
+        type: 'button',
+        onClick: onDelete,
+        title: '删除这个上传的模板',
+        className: 'absolute right-1.5 bottom-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-red)',
+        children: '×',
+      }) : null,
     ],
   })
 }
