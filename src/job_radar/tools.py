@@ -18,6 +18,11 @@ try:
 except ImportError:          # 脱离包单独导入时（单测）
     from logging_setup import get_logger
 
+try:
+    from . import city_codes
+except ImportError:          # 脱离包单独导入时（单测）
+    import city_codes
+
 log = get_logger()
 
 # 各站的字段 → 统一词表的映射
@@ -65,11 +70,15 @@ def _excluded(job, profile):
     return False
 
 
-def _fetch_site(site, keyword, cfg):
-    """抓一个站一个关键词。返回 (jobs, error)。"""
+def _fetch_site(site, keyword, cfg, city_code=None):
+    """抓一个站一个关键词。返回 (jobs, error)。
+
+    city_code: 智联的城市码（jl）。**不传就用配置里的**。
+    """
+    city = city_code if city_code is not None else cfg.get("city")
     if site == "zhaopin":
         data = bbclient.run_site("zhaopin/search", keyword,
-                                 "--city", str(cfg["city"]))
+                                 "--city", str(city))
         if "error" in data:
             log.warning("抓取失败 site=zhaopin kw=%s err=%s",
                         keyword, str(data["error"])[:150])
@@ -126,42 +135,78 @@ def scan(args, **kwargs):
         except Exception:
             experiences = []
 
+        # **先用当前画像重算所有老岗位的分数** ——
+        #
+        # 改了画像（方向/技能/城市）之后，**没被抓到的老岗位**分数还是旧的。
+        # 实测踩到：方向从「web 前端」改成「跨境电商运营」后，
+        # 杭州的 web 前端老岗位还留着 78 分，比新抓的运营岗（76）还高
+        # → **老岗位全挤在前面**。
+        #
+        # `upsert()` 只在被重新抓到时更新分数，所以这里要单独重算一遍。
+        try:
+            rescored = storage.rescore_all(prof, experiences=experiences)
+            if rescored:
+                log.info("按新画像重算了 %d 条老岗位的分数", rescored)
+        except Exception as exc:
+            log.warning("重算老岗位分数失败（不影响本次抓取）: %s", exc)
+
+        # **多个城市**（可选）——
+        # 只有 `cfg["city"]`（单值）时行为跟以前一样。
+        #
+        # 为什么要逐个城市抓：智联的 `--city` **只认一个城市码**，
+        # 传逗号分隔（"551,763"）会**静默退化成全国** —— 实测过，
+        # 返回的是北京/保定/上海，根本没有限定城市。
+        #
+        # `cfg["cities"]` 存的是**城市名**（用户在设置页选的），
+        # 这里翻译成智联码 —— 用户不该看到「南宁 = 3150」这种天书。
+        city_list = []
+        try:
+            city_list = city_codes.cities_to_codes(cfg.get("cities") or [])
+        except Exception:
+            city_list = []
+        city_codes_list = city_list
+        if not city_codes_list:
+            city_codes_list = [str(cfg.get("city") or "").strip() or "489"]
+
         for site in sites:
-            for kw in keywords:
-                if seen >= limit:
-                    break
-                jobs, err = _fetch_site(site, kw, cfg)
-                if err:
-                    errors.append("%s/%s: %s" % (site, kw, err))
-                    continue
-                for raw in jobs:
+            for city_code in city_codes_list:
+                for kw in keywords:
                     if seen >= limit:
                         break
-                    job = _normalize(raw, site)
-                    if not job.get("title"):
+                    jobs, err = _fetch_site(site, kw, cfg, city_code)
+                    if err:
+                        errors.append("%s/%s/%s: %s" % (site, city_code, kw, err))
                         continue
-                    if _excluded(job, prof):
-                        continue
-                    seen += 1
-                    scored = score_job(job, prof, experiences=experiences)
-                    job["score"] = scored["score"]
-                    if storage.upsert(job, scored):
-                        new_count += 1
-                    if scored["score"] >= min_score:
-                        results.append({
-                            "job_id": job.get("job_id") or job.get("url"),
-                            "source": site,
-                            "title": job.get("title"),
-                            "company": job.get("company"),
-                            "salary": job.get("salary"),
-                            "area": job.get("area"),
-                            "score": scored["score"],
-                            "url": job.get("url"),
-                            "why": scored["reasons"],
-                            "gap": scored["missing"],
-                        })
-                # 每次 adapter 调用后必须停顿，模拟人手
-                bbclient.polite_pause(gap)
+                    for raw in jobs:
+                        if seen >= limit:
+                            break
+                        job = _normalize(raw, site)
+                        if not job.get("title"):
+                            continue
+                        if _excluded(job, prof):
+                            continue
+                        seen += 1
+                        scored = score_job(job, prof, experiences=experiences)
+                        job["score"] = scored["score"]
+                        if storage.upsert(job, scored):
+                            new_count += 1
+                        if scored["score"] >= min_score:
+                            results.append({
+                                "job_id": job.get("job_id") or job.get("url"),
+                                "source": site,
+                                "title": job.get("title"),
+                                "company": job.get("company"),
+                                "salary": job.get("salary"),
+                                "area": job.get("area"),
+                                "score": scored["score"],
+                                "url": job.get("url"),
+                                "why": scored["reasons"],
+                                "gap": scored["missing"],
+                            })
+                    # 每次 adapter 调用后必须停顿，模拟人手
+                    bbclient.polite_pause(gap)
+                if seen >= limit:
+                    break
             if seen >= limit:
                 break
 

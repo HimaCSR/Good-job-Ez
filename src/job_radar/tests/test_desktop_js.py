@@ -772,5 +772,71 @@ class TestJobCollapse(unittest.TestCase):
                       "渲染的还是全部 jobs，前 5 条的限制没生效")
 
 
+class TestCityPicker(unittest.TestCase):
+    """「抓取城市」选择器 —— 用户选城市名，不选城市码。
+
+    ## 为什么这样设计
+
+    智联的城市码是「南宁 = 3150」这种天书，用户不该看到。
+    所以前端给**城市名**，抓取时由后端 `city_codes.py` 翻译成码。
+
+    ## 为什么不能在前端硬编码码
+
+    码表是**实测**出来的（`scripts/verify-city-codes.sh`），
+    而且**经常要更新**（换城市、加城市）。
+    硬编码在前端 = 两份真相源，必然对不上。
+
+    还要防一个更隐蔽的错：**用户选的是城市名，
+    后端收到的是城市名** —— 如果中间哪一环偷偷变成了码，
+    抓取就会静默抓到别的城市。
+    """
+
+    def setUp(self):
+        self.src = _read()
+        self.funcs = dict(_functions(self.src))
+
+    def test_city_picker_exists(self):
+        self.assertIn("CityPicker", self.funcs,
+                      "找不到 CityPicker 组件")
+
+    def test_uses_cities_hook(self):
+        """城市列表要从后端拉，不能写死。"""
+        body = self.funcs.get("CityPicker", "")
+        self.assertIn("useCities", body,
+                      "CityPicker 没有用 useCities 拉城市列表")
+
+    def test_no_hardcoded_city_codes(self):
+        """**前端不能硬编码城市码** —— 码表在后端，且要常更新。
+
+        **只看代码，不看注释** ——
+        注释里写「不给人『南宁 = 3150』这种天书」是说明，不是硬编码。
+        """
+        code_only = _strip_comments(self.src)
+        for code in ["3150", "3165", "551", "763", "540", "538"]:
+            self.assertNotIn(code, code_only,
+                             "前端硬编码了城市码 %s（码表该放后端）" % code)
+
+    def test_settings_view_uses_city_picker(self):
+        """设置页要有「抓取城市」入口。"""
+        body = self.funcs.get("SettingsView", "")
+        self.assertIn("CityPicker", body,
+                      "SettingsView 没有用 CityPicker")
+
+    def test_cities_value_is_city_names(self):
+        """**存的是城市名** —— 不是码。
+
+        抓取时后端才翻译成码（`city_codes.cities_to_codes`）。
+        """
+        body = self.funcs.get("SettingsView", "")
+        self.assertIn("'cities'", body,
+                      "设置页没有保存 cities 字段")
+
+    def test_use_cities_hook_calls_api(self):
+        """hook 要打后端的 /cities。"""
+        m = re.search(r"function useCities\(.*?\n\}\n", self.src, re.S)
+        self.assertIsNotNone(m, "找不到 useCities")
+        self.assertIn("/cities", m.group(0))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -132,6 +132,53 @@ def _conn():
     return conn
 
 
+def rescore_all(profile, experiences=None, score_fn=None):
+    """用**当前画像**重算所有岗位的分数。
+
+    ## 为什么需要
+
+    改了画像（方向、技能、城市）之后，**没被抓到的老岗位**分数还是旧的。
+
+    实测踩到：把方向从「web 前端」改成「跨境电商运营」后，
+    岗位池里杭州的 web 前端老岗位还留着 **78 分**，
+    比新抓的运营岗（76 分）还高 → **老岗位全挤在前面**。
+
+    `upsert()` 只在岗位**被重新抓到**时更新分数 ——
+    没抓到的就一直是旧值。
+
+    ## 怎么做
+
+    读出所有岗位 → 用新画像重新打分 → 写回。
+    **不动 first_seen / pushed_at**（那是投递状态，跟分数无关）。
+
+    score_fn: 打分函数（默认用 matcher.score_job）。
+    """
+    if score_fn is None:
+        try:
+            from .matcher import score_job as score_fn
+        except ImportError:      # 脱离包单独导入时（单测）
+            from matcher import score_job as score_fn
+
+    jobs = all_jobs(limit=100000, min_score=0)
+    if not jobs:
+        return 0
+
+    now = datetime.now().isoformat(timespec="seconds")
+    changed = 0
+    with _conn() as conn:
+        for j in jobs:
+            scored = score_fn(j, profile, experiences=experiences)
+            conn.execute(
+                "UPDATE jobs SET score=?, reasons=?, missing=? WHERE job_id=?",
+                (scored["score"],
+                 json.dumps(scored.get("reasons") or [], ensure_ascii=False),
+                 json.dumps(scored.get("missing") or [], ensure_ascii=False),
+                 j.get("job_id")),
+            )
+            changed += 1
+    return changed
+
+
 def upsert(job, scored):
     """插入或更新一条岗位。返回 True 表示是新岗位。"""
     now = datetime.now().isoformat(timespec="seconds")

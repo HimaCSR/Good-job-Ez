@@ -23,10 +23,38 @@ def score_job(job: dict, profile: dict, experiences=None) -> dict:
         str(job.get("tags") or ""),
         str(job.get("raw") or ""),
     ]).lower()
-    hits = [k for k in profile.get("title_keywords", []) if k.lower() in haystack]
-    if hits:
-        score += min(30, 10 * len(hits))
-        reasons.append("职位名命中: " + "、".join(hits))
+
+    # **主攻方向优先** ——
+    #
+    # 用户同时投多个方向时（比如「主攻运营，顺便看结构设计」），
+    # 关键词混在一张列表里会**平分 30 分** → 两个方向岗位混排，
+    # 主攻方向被次要方向挤下去。
+    #
+    # 分两级：
+    #   title_keywords_primary —— 主攻，命中给满 30 分
+    #   title_keywords          —— 次要，命中给 15 分
+    # 这样主攻方向**一定排在前面**，次要方向也不会被丢掉。
+    primary_kw = [k for k in (profile.get("title_keywords_primary") or [])
+                  if k and k.lower() in haystack]
+    secondary_kw = [k for k in (profile.get("title_keywords") or [])
+                    if k and k.lower() in haystack]
+
+    hits = primary_kw + secondary_kw
+    if primary_kw:
+        # **主攻命中 → 满 30 分**
+        score += 30
+        reasons.append("主攻方向命中: " + "、".join(primary_kw))
+    elif secondary_kw:
+        if profile.get("title_keywords_primary"):
+            # **填了主攻方向** → 次要只给 15 分
+            # （主攻一定排在前面，否则主攻方向会被次要方向挤下去）
+            score += 15
+            reasons.append("期望岗位词命中: " + "、".join(secondary_kw))
+        else:
+            # **没填主攻方向** → 按老规则（每个 +10，最多 30）
+            # 老行为不变 —— 否则没填主攻的用户分数会整体掉 15 分。
+            score += min(30, 10 * len(secondary_kw))
+            reasons.append("期望岗位词命中: " + "、".join(secondary_kw))
     else:
         missing.append("职位名未命中期望岗位词")
 

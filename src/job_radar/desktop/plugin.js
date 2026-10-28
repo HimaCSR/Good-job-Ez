@@ -693,9 +693,19 @@ function ProfileView({ ctx, cfg, onSaved }) {
               }),
             }),
             jsx(Field, {
-              label: '岗位方向',
+              label: '主攻方向',
               wide: true,
-              hint: '出现在岗位名里就加分，每命中一个 +10，最多 30 分',
+              hint: '出现在岗位名里就命中，命中给满 30 分 —— 排最前面',
+              children: jsx(ChipEditor, {
+                value: local.title_keywords_primary || [],
+                onChange: (v) => set('title_keywords_primary', v),
+                addLabel: '添加主攻方向',
+              }),
+            }),
+            jsx(Field, {
+              label: '也投的方向',
+              wide: true,
+              hint: '也投，但命中只给 15 分 —— 排在主攻方向后面',
               children: jsx(ChipEditor, {
                 value: local.title_keywords || [],
                 onChange: (v) => set('title_keywords', v),
@@ -1480,6 +1490,18 @@ function useLogs(ctx, enabled) {
 }
 
 /** 各站的投递开关与每日上限（投递三道门的第一、三道）。 */
+// 智联城市码表（城市名 → jl 码）。
+//
+// **用户不该看到「南宁 = 3150」这种天书** ——
+// 所以前端给城市名，抓取时后端翻译成码。
+function useCities(ctx) {
+  return useQuery({
+    queryKey: ['job-radar', 'cities'],
+    queryFn: async () => ctx.rest('/cities'),
+    staleTime: 600000,
+  })
+}
+
 function useApplySwitches(ctx) {
   return useQuery({
     queryKey: ['job-radar', 'apply-switches'],
@@ -1877,6 +1899,21 @@ function SettingsView({ ctx, cfg }) {
   const [local, setLocal] = React.useState(settings)
   React.useEffect(() => { setLocal(settings) }, [settings])
 
+  // **按当前画像重排岗位** ——
+  // 改了方向/技能/城市之后，没被抓到的老岗位分数还是旧的
+  // （`upsert` 只在被重新抓到时更新分数）→ 老岗位会挤在前面。
+  const rescore = useMutation({
+    mutationFn: async () => ctx.rest('/rescore', { method: 'POST' }),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'jobs'] })
+      host.notify({
+        kind: 'success',
+        message: '已按当前画像重排 ' + ((r && r.rescored) || 0) + ' 条岗位',
+      })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
+  })
+
   const save = useMutation({
     mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
     onSuccess: () => {
@@ -1905,8 +1942,100 @@ function SettingsView({ ctx, cfg }) {
           set,
         }),
       }),
+      jsx('div', { className: 'h-3' }),
+      jsx(Panel, {
+        title: '抓取城市',
+        hint: (local.cities && local.cities.length)
+          ? ('已选 ' + local.cities.length + ' 个：' + local.cities.join('、'))
+          : '没选 = 按插件默认城市',
+        actions: jsxs('div', { className: 'flex items-center gap-2', children: [
+          jsx(Button, {
+            size: 'sm',
+            variant: 'outline',
+            disabled: rescore.isPending,
+            onClick: () => rescore.mutate(),
+            children: rescore.isPending ? '重排中…' : '按当前画像重排岗位',
+          }),
+          jsx(Button, {
+            size: 'sm',
+            variant: 'default',
+            disabled: save.isPending,
+            onClick: () => save.mutate(local),
+            children: save.isPending ? '保存中…' : '保存',
+          }),
+        ] }),
+        children: jsxs('div', { className: 'flex flex-col gap-2', children: [
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: '选想看的城市。每个城市都会单独抓一遍 —— ' +
+              '智联一次只认一个城市，逗号分隔会静默变成全国。',
+          }),
+          jsx(CityPicker, {
+            ctx,
+            value: local.cities || [],
+            onChange: (v) => set('cities', v),
+          }),
+        ] }),
+      }),
     ],
   })
+}
+
+/* 抓取城市 —— 给用户**城市名**，不给人「南宁 = 3150」这种天书。
+ *
+ * 智联的 --city 只认一个码，逗号分隔会静默退化成全国，
+ * 所以这里是**多选**，后端逐个城市抓。
+ *
+ * 「热门」是常用城市（实测有岗位的），「全部」是完整码表。 */
+function CityPicker({ ctx, value, onChange }) {
+  const citiesQ = useCities(ctx)
+  const all = (citiesQ.data && citiesQ.data.cities) || []
+  const list = Array.isArray(value) ? value : []
+  const [showAll, setShowAll] = React.useState(false)
+
+  // **只列码表里有的城市** —— 不然点了选不上（后端认不出）。
+  const HOT = ['广州', '深圳', '杭州', '上海', '北京', '重庆', '南宁',
+               '桂林', '南京', '东莞', '珠海', '江门', '泉州', '海口',
+               '柳州', '北海', '常州', '徐州', '宁波']
+  const shown = showAll ? all : all.filter((c) => HOT.includes(c.name))
+
+  const toggle = (name) => {
+    onChange(list.includes(name)
+      ? list.filter((x) => x !== name)
+      : [...list, name])
+  }
+
+  if (citiesQ.isLoading) return jsx(GlyphSpinner, { className: 'p-3' })
+  if (citiesQ.isError) return jsx(ErrorState, { message: String(citiesQ.error) })
+
+  return jsxs('div', { className: 'flex flex-col gap-2', children: [
+    jsxs('div', { className: 'flex flex-wrap gap-1.5', children:
+      shown.map((c) => jsx('button', {
+        key: c.name,
+        type: 'button',
+        className: cn(
+          'rounded-full border px-2.5 py-0.5 text-xs',
+          list.includes(c.name)
+            ? 'border-(--ui-accent) text-(--ui-text-primary)'
+            : 'border-(--ui-stroke-tertiary) text-(--ui-text-tertiary) hover:text-(--ui-text-primary)'),
+        onClick: () => toggle(c.name),
+        children: c.name,
+      })) }),
+    jsxs('div', { className: 'flex items-center gap-2', children: [
+      jsx('button', {
+        type: 'button',
+        className: 'text-[0.6875rem] text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+        onClick: () => setShowAll((v) => !v),
+        children: showAll ? '只看热门城市' : '看全部城市（' + all.length + '）',
+      }),
+      list.length > 0 && jsx('button', {
+        type: 'button',
+        className: 'text-[0.6875rem] text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+        onClick: () => onChange([]),
+        children: '清空',
+      }),
+    ] }),
+  ] })
 }
 
 /* 筛选条件的字段组 —— 「设置」页和「今日候选 ▸ 高级」共用一套，

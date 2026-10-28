@@ -45,7 +45,7 @@ _SIBLINGS = (
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
     "mock_provider", "apply_gate", "browser_session",
-    "template_convert", "template_store",
+    "template_convert", "template_store", "city_codes",
 )
 
 
@@ -1000,6 +1000,50 @@ def delete_photo() -> Dict[str, Any]:
 
 def _mock():
     return _sibling("mock_provider")
+
+
+@router.post("/rescore")
+def rescore_all_jobs() -> Dict[str, Any]:
+    """用当前画像**重算所有岗位的分数**。
+
+    ## 为什么需要
+
+    改了画像（方向/技能/城市）之后，**没被抓到的老岗位**分数还是旧的 ——
+    `upsert()` 只在岗位被重新抓到时更新分数。
+
+    实测踩到：方向从「web 前端」改成「跨境电商运营」后，
+    杭州的 web 前端老岗位还留着 78 分，比新抓的运营岗（76）还高
+    → **老岗位全挤在推荐前面**，跟用户改的方向完全对不上。
+
+    改完画像点一下这个，就立刻按新画像重排，不用等下次抓取。
+    """
+    try:
+        prof = _read_profile()
+        try:
+            experiences = _sibling("storage").list_experiences()
+        except Exception:
+            experiences = []
+        n = _sibling("storage").rescore_all(prof, experiences=experiences)
+        return {"ok": True, "rescored": n}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@router.get("/cities")
+def list_cities() -> Dict[str, Any]:
+    """智联城市码表（城市名 → jl 码）。
+
+    **前端给用户城市名，不给码** ——
+    用户不知道「南宁 = 3150」，但看得懂「南宁」。
+
+    码是**实测**出来的（不是抄的）：逐个码跑真实抓取，
+    看返回岗位的 `area` 城市名对不对。
+    """
+    try:
+        cc = _sibling("city_codes")
+        return {"ok": True, "cities": cc.known_cities()}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 @router.get("/mock/status")
