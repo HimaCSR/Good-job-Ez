@@ -86,6 +86,30 @@ function escapeClass(c) {
   return c.replace(/[.*+?^${}()|[\]\\/#%!,'"<>~]/g, (m) => '\\' + m)
 }
 
+// ── 染色变量检查 ──────────────────────────────────────────────────────────
+//
+// **会被主色调染色的变量** —— 拿它们当表面色，整个界面就「蒙了一层蓝」。
+//
+// app 的 app.css 里这些变量会被重新定义成
+//     color-mix(in srgb, var(--ui-accent) <mix>, ...)
+// 而 --ui-accent = --theme-midground = #0053fd（蓝）。
+//
+// 也就是说：**它们不是中性表面色，是「带主色调的浅蓝」**。
+//
+// 中性的表面色是：
+//     --ui-bg-editor      卡片底（= --dt-card）
+//     --ui-bg-elevated    弹层 / 次级凹陷面
+//     --ui-bg-chrome      页面底
+//     --ui-stroke-tertiary 弱边框
+const ACCENT_TINTED = [
+  '--ui-bg-primary',
+  '--ui-bg-secondary',
+  '--ui-bg-tertiary',
+  '--ui-stroke-secondary',
+  '--ui-stroke-primary',
+  '--ui-row-hover-background',
+]
+
 const missing = []
 for (const c of used) {
   if (IGNORE.has(c)) continue
@@ -137,4 +161,21 @@ if (missing.length) {
   console.error('  → 硬编码颜色（如 #0053fd）也违反主题变量约定。')
   process.exit(1)
 }
-console.log('✔ 桌面端用到的类在 app CSS 里都存在（检查了 ' + used.size + ' 个）')
+
+// ── 染色变量检查（放在最后，让「类不存在」先报）─────────────────────────
+const tinted = [...used].filter(
+  (c) => ACCENT_TINTED.some((v) => c.includes(v)),
+)
+if (tinted.length) {
+  console.error('✘ 这些类用了**会被主色调染色**的变量（界面会蒙一层蓝）：')
+  for (const c of [...new Set(tinted)].sort()) console.error('    ' + c)
+  console.error('')
+  console.error('  → 换成中性色：')
+  console.error('      卡片底   bg-(--ui-bg-editor)')
+  console.error('      次级面   bg-(--ui-bg-elevated)')
+  console.error('      边框     border-(--ui-stroke-tertiary)')
+  console.error('')
+  process.exit(1)
+}
+
+console.log('✔ 桌面端用到的类在 app CSS 里都存在，且没有用染色变量（检查了 ' + used.size + ' 个）')
