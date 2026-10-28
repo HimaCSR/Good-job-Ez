@@ -4,8 +4,7 @@
 
 1. `plugin_api.py` 能正常加载（不炸）
 2. 每个 `_sibling("X")` 用到的模块**都真的能取到**（不是 None）
-3. `.md` 简历能解析（**用插件实际加载的那个模块**，不是直接 import）
-4. **热重载真的生效** —— 改源码后，同一个进程里拿到新代码
+3. **热重载真的生效** —— 改源码后，同一个进程里拿到新代码
 
 ## 为什么第 4 条重要
 
@@ -95,47 +94,6 @@ def main():
             check("模块 %s 可用" % name, True)
         except Exception as exc:      # noqa: BLE001
             check("模块 %s 可用" % name, False, str(exc))
-
-    # ③ .md 简历能解析（用插件实际加载的模块）
-    ri = api._sibling("resume_import")
-    md = """# 张三的简历
-
-**姓名**：张三
-**电话**：138****0000
-**邮箱**：zhangsan@example.com
-**最高学历**：本科
-**毕业院校**：某某大学
-**专业**：软件工程
-
-## 专业技能
-
-- Python
-- Go
-- Kubernetes
-
-## 工作经历
-
-### 某某科技有限公司 | 高级后端工程师 | 2023.04 - 至今
-
-- 负责核心服务架构设计
-- 主导数据库分库分表改造
-
-## 期望城市
-
-- 杭州
-- 上海
-"""
-    result = ri.parse_resume("r.md", md.encode("utf-8"))
-    check(".md 解析返回 ok", result.get("ok"), result.get("note", ""))
-    d = result.get("draft") or {}
-    check(".md 解析出姓名", d.get("identity", {}).get("name") == "张三",
-          repr(d.get("identity", {}).get("name")))
-    check(".md 解析出城市", "杭州" in (d.get("cities") or []),
-          str(d.get("cities")))
-    check(".md 解析出经历", len(d.get("experiences") or []) == 1,
-          "%d 段" % len(d.get("experiences") or []))
-    check(".md 解析出技能", "Python" in (d.get("skills") or []),
-          str(d.get("skills")))
 
     # ④ 热重载真的生效吗
     #

@@ -446,85 +446,6 @@ function ExperienceForm({ exp, busy, onCancel, onSave }) {
   })
 }
 
-/* 从简历文档导入 —— 本地规则解析，不走大模型。
- *
- * **文件不离开这台电脑**：读进来就在内存里解析，不落盘、不外传。
- * 解析结果是**草稿**，填进表单后用户自己核对、保存。
- */
-function ResumeImportPanel({ ctx, onDraft }) {
-  const [file, setFile] = React.useState(null)
-  const [status, setStatus] = React.useState('')
-  const [busy, setBusy] = React.useState(false)
-
-  const doParse = async () => {
-    if (!file) { setStatus('先选一个文件'); return }
-    setBusy(true); setStatus('解析中…')
-    try {
-      const buf = await file.arrayBuffer()
-      let binary = ''
-      const bytes = new Uint8Array(buf)
-      const chunk = 0x8000
-      for (let i = 0; i < bytes.length; i += chunk) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk))
-      }
-      const r = await ctx.rest('/resume/import', {
-        method: 'POST',
-        body: { filename: file.name, data_base64: btoa(binary) },
-      })
-      if (!r || r.ok === false) {
-        setStatus((r && r.error) || '解析失败')
-        return
-      }
-      const found = r.found || {}
-      const bits = []
-      if (found.identity) bits.push('身份 ' + found.identity + ' 项')
-      if (found.skills) bits.push('技能 ' + found.skills + ' 个')
-      if (found.experiences) bits.push('经历 ' + found.experiences + ' 段')
-      setStatus((r.note ? r.note + ' ' : '') + (bits.length ? '已识别：' + bits.join('、') : '没识别出内容'))
-      if (r.draft) onDraft && onDraft(r.draft)
-    } catch (e) {
-      setStatus(String((e && e.message) || e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return jsxs('div', { className: 'flex flex-col gap-3', children: [
-    jsx('label', {
-      className: 'flex cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-4 py-6 text-center hover:bg-(--ui-bg-elevated)',
-      children: [
-        jsx('span', { className: 'text-sm text-(--ui-text-primary)',
-          children: file ? file.name : '拖入或点击选择简历文件' }),
-        jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-          children: '支持 .docx / .pdf / .txt / .md · 解析在本机完成，文件不会离开这台电脑' }),
-        jsx('input', {
-          type: 'file',
-          accept: '.docx,.pdf,.txt,.md,.markdown',
-          className: 'hidden',
-          onChange: (e) => {
-            const f = e.target.files && e.target.files[0]
-            setFile(f || null)
-            setStatus(f ? '已选：' + f.name : '')
-          },
-        }),
-      ],
-    }),
-    jsxs('div', { className: 'flex items-center gap-2.5', children: [
-      jsx(Button, {
-        size: 'sm',
-        variant: 'default',
-        disabled: busy || !file,
-        onClick: doParse,
-        children: busy ? '解析中…' : '识别并填写表单',
-      }),
-      jsx('span', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-        children: status || '先选一个文件' }),
-    ]}),
-    jsx('span', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
-      children: '识别走的是本地规则解析（按段落结构 + 字段关键词抽取），不调用大模型，避免简历内容被发送出去。解析结果只是一份草稿，确认无误后再点「保存」才写入。' }),
-  ]})
-}
-
 function ProfileView({ ctx, cfg, onSaved }) {
   const qc = useQueryClient()
   const profile = (cfg && cfg.profile) || {}
@@ -546,50 +467,12 @@ function ProfileView({ ctx, cfg, onSaved }) {
   const identity = local.identity || {}
   const setIdentity = (k, v) => set((s) => ({ ...s, identity: { ...(s.identity || {}), [k]: v } }))
 
-  // 简历解析出来的草稿 → 填进表单
-  // **只填空位，不覆盖用户已填的** —— 用户手改过的比机器抽的准。
-  const applyDraft = (draft) => {
-    setLocal((s) => {
-      const next = { ...s }
-      if (draft.identity) {
-        next.identity = { ...(s.identity || {}) }
-        for (const [k, v] of Object.entries(draft.identity)) {
-          if (v && !next.identity[k]) next.identity[k] = v
-        }
-      }
-      if (draft.skills && draft.skills.length) {
-        const have = new Set(s.skills || [])
-        next.skills = [...(s.skills || []), ...draft.skills.filter((x) => !have.has(x))]
-      }
-      if (draft.cities && draft.cities.length) {
-        const have = new Set(s.cities || [])
-        next.cities = [...(s.cities || []), ...draft.cities.filter((x) => !have.has(x))]
-      }
-      if (draft.title_keywords && draft.title_keywords.length) {
-        const have = new Set(s.title_keywords || [])
-        next.title_keywords = [...(s.title_keywords || []),
-          ...draft.title_keywords.filter((x) => !have.has(x))]
-      }
-      if (draft.min_salary && !s.min_salary) next.min_salary = draft.min_salary
-      if (draft.experience_text && !s.experience_text) {
-        next.experience_text = draft.experience_text
-      }
-      return next
-    })
-  }
-
   if (!profile || !Object.keys(profile).length) {
     return jsx(ErrorState, { message: '读不到个人画像' })
   }
 
   return jsxs(Fragment, {
     children: [
-      jsx(Panel, {
-        title: '从简历文档导入',
-        hint: '本地解析，不走大模型',
-        children: jsx(ResumeImportPanel, { ctx, onDraft: applyDraft }),
-      }),
-      jsx('div', { className: 'h-3' }),
       jsx(Panel, {
         title: '身份信息',
         hint: '仅用于简历生成表单',

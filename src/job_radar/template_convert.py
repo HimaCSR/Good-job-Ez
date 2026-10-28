@@ -321,7 +321,7 @@ def _pdf_to_css(data):
 
 
 def _pdf_text(data):
-    """从 PDF 抽文本（跟 resume_import 同一套思路）。"""
+    """从 PDF 抽文本（纯正则抽文本流，不依赖字体映射表）。"""
     try:
         raw = data.decode("latin-1", errors="replace")
     except Exception:      # noqa: BLE001

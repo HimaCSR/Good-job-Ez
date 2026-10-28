@@ -104,7 +104,7 @@ class TestSiblingModules(unittest.TestCase):
         src = self._api_source()
         m = re.search(r"_SIBLINGS\s*=\s*\((.*?)\n\)", src, re.S)
         registered = set(re.findall(r'"([\w]+)"', m.group(1)))
-        for name in ("storage", "resume_import", "resume_template",
+        for name in ("storage", "resume_template",
                      "template_convert", "template_store", "apply_gate",
                      "browser_session", "mock_provider"):
             self.assertIn(name, registered,

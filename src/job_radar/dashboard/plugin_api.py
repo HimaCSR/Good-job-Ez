@@ -44,7 +44,7 @@ _SIBLINGS = (
     "config", "schemas", "matcher", "storage", "bbclient",
     "report", "push", "login_check", "browser_cookies", "tools",
     "logging_setup", "resume_template", "resume_builder", "resume_store",
-    "mock_provider", "apply_gate", "browser_session", "resume_import",
+    "mock_provider", "apply_gate", "browser_session",
     "template_convert", "template_store",
 )
 
@@ -71,10 +71,9 @@ def _load_siblings() -> Dict[str, Any]:
             # 但那个模块可能是**旧版本**（别的插件先 import 了它，
             # 或者 app 在别处加载了一份）。
             #
-            # 本机踩过：新进程里 `job_radar.resume_import` 已经在
-            # sys.modules 里（旧的），于是新加的 `.md` 支持不生效 ——
-            # 用户看到「不支持的格式：.md（支持 .docx / .pdf / .txt）」，
-            # 而磁盘上的文件明明已经支持了。
+            # 本机踩过：新进程里兄弟模块已经在 sys.modules 里（旧的），
+            # 于是新加的功能不生效 —— 用户看到旧行为，
+            # 而磁盘上的文件明明已经改好了。
             #
             # **改成总是从磁盘加载** —— 插件的兄弟模块之间没有
             # 必须共享实例的场景，重新 import 是安全的。
@@ -1096,58 +1095,6 @@ def apply_submit(body: Dict[str, Any]) -> Dict[str, Any]:
         log.info("投递成功 job=%s resume=%s mock=%s",
                  job_id, (resume or {}).get("resume_id"), is_mock)
     return result
-
-
-# ── 简历文档导入 ────────────────────────────────────────────────────────────
-#
-# **纯本地规则解析，不调大模型** —— 简历内容是个人信息，发出去就是泄露。
-# 文件读进来就在内存里解析，不落盘、不外传。
-# 返回的是**草稿**，用户核对后点保存才写进 profile.yaml。
-
-@router.post("/resume/import")
-def resume_import(body: Dict[str, Any]) -> Dict[str, Any]:
-    """上传简历文件 → 本地解析 → 返回草稿。
-
-    body: {filename, data_base64}
-    """
-    resume_import = _sibling("resume_import")
-    import base64
-
-    filename = (body.get("filename") or "").strip()
-    if not filename:
-        return {"ok": False, "error": "缺少文件名"}
-
-    data_b64 = body.get("data_base64") or ""
-    if not data_b64:
-        return {"ok": False, "error": "没有收到文件内容"}
-    # 去掉 data: URL 前缀
-    if data_b64.strip().startswith("data:"):
-        data_b64 = data_b64.split(",", 1)[1] if "," in data_b64 else ""
-
-    try:
-        raw = base64.b64decode(data_b64, validate=True)
-    except Exception:
-        return {"ok": False, "error": "文件内容不是合法的 base64"}
-    if not raw:
-        return {"ok": False, "error": "文件是空的"}
-    # 限 10 MB —— 简历文件用不了这么大
-    if len(raw) > 10 * 1024 * 1024:
-        return {"ok": False, "error": "文件太大（上限 10 MB）"}
-
-    try:
-        result = resume_import.parse_resume(filename, raw)
-    except Exception as exc:
-        return {"ok": False, "error": "解析失败: %s" % exc}
-
-    if not result.get("ok"):
-        return {"ok": False, "error": result.get("note") or "解析失败"}
-    return {
-        "ok": True,
-        "draft": result["draft"],
-        "found": result["found"],
-        "note": result.get("note", ""),
-        "hint": "解析结果是草稿 —— 核对无误后再保存",
-    }
 
 
 # ── 招聘站浏览器与登录 ──────────────────────────────────────────────────────

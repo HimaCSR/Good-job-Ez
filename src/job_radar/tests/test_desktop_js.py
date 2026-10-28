@@ -223,7 +223,7 @@ class TestNoUndefinedIdentifiers(unittest.TestCase):
         "Segmented", "Panel", "Field", "ChipEditor", "TemplateCard",
         "ResumeRow", "JobCard", "ApplyResumeDialog", "ResumeOptimizeDialog",
         "ExperienceEditor", "ExperienceForm", "PhotoUpload", "LoginPanel",
-        "ApplySwitchPanel", "PushSettingsPanel", "ResumeImportPanel",
+        "ApplySwitchPanel", "PushSettingsPanel",
         "ProfileView", "RecommendView", "ResumeView", "PlatformView",
         "ReportView", "SettingsView", "FilterFields", "SettingsPage",
         "SubPage", "ViewBody", "useConfig", "useJobs", "useRuns", "useLogin",
