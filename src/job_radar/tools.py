@@ -119,6 +119,13 @@ def scan(args, **kwargs):
         run_id = storage.start_run()
         seen, results, new_count, errors = 0, [], 0, []
 
+        # **结构化经历** —— 用来给「方向匹配」加分（干过的职位名）。
+        # **提前取一次**，别在循环里反复查库。
+        try:
+            experiences = storage.list_experiences()
+        except Exception:
+            experiences = []
+
         for site in sites:
             for kw in keywords:
                 if seen >= limit:
@@ -136,7 +143,7 @@ def scan(args, **kwargs):
                     if _excluded(job, prof):
                         continue
                     seen += 1
-                    scored = score_job(job, prof)
+                    scored = score_job(job, prof, experiences=experiences)
                     job["score"] = scored["score"]
                     if storage.upsert(job, scored):
                         new_count += 1
@@ -344,14 +351,20 @@ def resume_optimize(args, **kwargs):
                                   "missing": job.get("missing") or []})
 
         prof = load_profile()
-        if not (prof.get("experience_text") or "").strip():
+        # **结构化经历优先** —— 它有公司/职位/起止，
+        # 是简历「工作经历」章节真正需要的东西；自由文本只是兜底。
+        experiences = storage.list_experiences()
+        has_text = bool((prof.get("experience_text") or "").strip())
+        if not experiences and not has_text:
             return json.dumps({
-                "error": "还没有填真实经历",
-                "hint": "设置页 → 用户简历 → 填「真实经历」，"
-                        "没有它就无法生成简历（也不该编造）",
+                "error": "还没有填经历",
+                "hint": "设置页 → 用户简历 → 填「结构化经历」"
+                        "（推荐，有公司/职位/起止）或「真实经历」文本。"
+                        "没有它无法生成简历（也不该编造）",
             }, ensure_ascii=False)
 
-        out = resume_builder.optimize_resume(job, prof, template_id)
+        out = resume_builder.optimize_resume(job, prof, template_id,
+                                             experiences=experiences)
         sections = resume_builder.build_sections(out["resume"])
         ctx = {"title": "%s - 简历" % (prof.get("identity") or {}).get("name", ""),
                "identity": out["resume"]["identity"],

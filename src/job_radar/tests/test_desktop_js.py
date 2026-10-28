@@ -695,5 +695,82 @@ class TestNoRelativeImports(unittest.TestCase):
         self.assertEqual(bad, [], "有不允许的 import: %s" % bad)
 
 
+class TestJobCollapse(unittest.TestCase):
+    """「岗位推荐」折叠：默认只显示最高分的 5 条，其余折叠到「更多岗位」。
+
+    ## 用户诉求
+
+    > 岗位推荐优先显示最高分的前 5 条，其余折叠起来至更多岗位。
+
+    ## 为什么静态查 + 真渲染都要
+
+    - **真渲染**（`scripts/verify-job-collapse.mjs`）验证行为：
+      排序、切片、展开、收起、按钮显示条件。
+    - **静态**（这里）验证**代码位置**：
+      最容易犯的错是把 `topJobs` 算在 `showAllJobs` 声明之前 ——
+      const 的暂时性死区会抛
+      「Cannot access 'showAllJobs' before initialization」
+      → **整个「岗位推荐」页白屏**，而且只在运行时炸。
+    """
+
+    def setUp(self):
+        self.src = _read()
+        self.funcs = dict(_functions(self.src))
+
+    def _recommend_view_body(self):
+        body = self.funcs.get("RecommendView")
+        self.assertIsNotNone(body, "找不到 RecommendView 的函数体")
+        return body
+
+    def test_has_top_n_five(self):
+        """**默认 5 条**。"""
+        body = self._recommend_view_body()
+        self.assertIn("TOP_N = 5", body,
+                      "岗位推荐没有「默认 5 条」的常量")
+
+    def test_sorts_by_score_desc(self):
+        """**按 score 降序排** —— 前端不能假设后端的顺序。"""
+        body = self._recommend_view_body()
+        self.assertIn("(b.score || 0) - (a.score || 0)", body,
+                      "岗位推荐没有按分数降序排序")
+
+    def test_collapse_state_exists(self):
+        """有展开/收起的 state。"""
+        body = self._recommend_view_body()
+        self.assertIn("showAllJobs", body)
+        self.assertIn("setShowAllJobs", body)
+
+    def test_more_jobs_button(self):
+        """有「更多岗位」按钮。"""
+        body = self._recommend_view_body()
+        self.assertIn("更多岗位", body)
+
+    def test_no_temporal_dead_zone(self):
+        """**`showAllJobs` 的使用必须在它声明之后**。
+
+        const 的暂时性死区：声明前使用 → 运行时直接抛
+        「Cannot access 'showAllJobs' before initialization」
+        → 整页白屏。
+
+        这是本机真踩过的 —— 所以固化成测试。
+        """
+        body = self._recommend_view_body()
+        decl = body.find("const [showAllJobs")
+        self.assertGreater(decl, -1, "找不到 showAllJobs 的声明")
+
+        # 声明之后才有第一个「使用」（排除声明行本身）
+        use = body.find("showAllJobs ? ranked")
+        self.assertGreater(use, -1, "找不到 showAllJobs 的使用")
+        self.assertGreater(use, decl,
+                           "showAllJobs 用在了声明之前 —— "
+                           "暂时性死区会让整个页面白屏")
+
+    def test_renders_top_jobs_not_all(self):
+        """**渲染的是 topJobs 而不是全部 jobs**。"""
+        body = self._recommend_view_body()
+        self.assertIn("topJobs.map", body,
+                      "渲染的还是全部 jobs，前 5 条的限制没生效")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

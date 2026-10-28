@@ -3,8 +3,13 @@
 import re
 
 
-def score_job(job: dict, profile: dict) -> dict:
-    """返回 {"score": 0-100, "reasons": [...], "missing": [...]}"""
+def score_job(job: dict, profile: dict, experiences=None) -> dict:
+    """返回 {"score": 0-100, "reasons": [...], "missing": [...]}
+
+    experiences: **结构化经历**（公司/职位/起止/bullets）
+                —— 用来判断「这个岗位的方向和你干过的对不对得上」。
+                没有就只看 profile 里的 title_keywords。
+    """
     score = 0
     reasons, missing = [], []
 
@@ -58,9 +63,57 @@ def score_job(job: dict, profile: dict) -> dict:
     # 4) 薪资（20 分）
     score += _salary_score(job.get("salary") or "", profile.get("min_salary", 0))
 
+    # 5) 方向匹配（最多 10 分）—— **结构化经历里的职位名**
+    #
+    # 用户填的「期望岗位词」是**主动设的意向**，
+    # 而结构化经历里的职位名是**干过的真实岗位** ——
+    # 后者是更硬的证据（干过 = 会）。
+    #
+    # 只在 title_keywords 没命中时给分：
+    # 否则同一件事会被算两遍（意向 + 经历），虚高。
+    #
+    # 上限 10 分，最后被 min(100) 夹住 —— 不会撑破分数分布。
+    if not hits:
+        dir_hit = _direction_from_experiences(title, experiences)
+        if dir_hit:
+            score += 10
+            reasons.append("方向匹配经历: " + "、".join(dir_hit))
+
     # 经验项：2026-10-26 起暂不纳入评分（字段保留，等评分模型稳定再启用）
 
     return {"score": max(0, min(100, score)), "reasons": reasons, "missing": missing}
+
+
+def _direction_from_experiences(title, experiences):
+    """岗位标题命中了结构化经历里的职位名 —— 返回命中的职位词。
+
+    **只比职位名，不比公司名** ——
+    公司名太泛（「某某科技」在哪个岗位标题里都可能出现）。
+    """
+    if not title or not experiences:
+        return []
+    out = []
+    for e in experiences:
+        pos = (e.get("title") or "").strip()
+        if not pos or len(pos) < 2:
+            continue
+        # 职位名整体出现在岗位标题里
+        if pos.lower() in title:
+            out.append(pos)
+            continue
+        # 反向：职位名的核心词（去掉「工程师/专员/经理」这类后缀）
+        core = re.sub(
+            r"(工程师|设计师|专员|经理|主管|技师|助理|实习生|技术员)$",
+            "", pos).strip()
+        if len(core) >= 2 and core.lower() in title:
+            out.append(pos)
+    # 去重
+    seen, uniq = set(), []
+    for x in out:
+        if x not in seen:
+            seen.add(x)
+            uniq.append(x)
+    return uniq
 
 
 def _wanted_cities(profile: dict) -> list:

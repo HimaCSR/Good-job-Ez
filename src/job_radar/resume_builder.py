@@ -108,6 +108,35 @@ def extract_requirements(jd_text, user_skills=None):
                 "user_has": normalize(name) in user_set
                 or any(normalize(a) in user_set for a in aliases),
             })
+
+    # **用户自己的技能也要当候选** ——
+    #
+    # 内置别名表只覆盖常见技术词。用户简历里的技能（CAD / Revit /
+    # 盈建科 / 天正 / 数据透视表…）常常**不在表里**，
+    # 于是 JD 明明写了「熟悉 CAD、Revit、盈建科」，
+    # 抽出来的要求里却**一个都没有** →
+    # 用户的 CAD / Revit 经历**一条都匹配不上** → 简历被写成空的。
+    #
+    # 规则：**用户会的技能 + 它出现在 JD 里** = 一条 JD 要求。
+    # （JD 里没提的不要加 —— 那是用户会的，不是岗位要的。）
+    known = {normalize(s["name"]) for s in skills}
+    for raw in (user_skills or []):
+        name = str(raw).strip()
+        if not name:
+            continue
+        n = normalize(name)
+        if n in known:
+            continue
+        hits = low.count(n)
+        if hits:
+            skills.append({
+                "name": name,
+                "aliases": [name],
+                "hits": hits,
+                "user_has": True,
+            })
+            known.add(n)
+
     # 命中多的排前面
     skills.sort(key=lambda s: (-s["hits"], s["name"]))
 
@@ -247,6 +276,26 @@ def split_experience(experience_text):
     return lines
 
 
+def _hit_skills(text, requirements):
+    """这段文字命中了 JD 要求的哪些技能。
+
+    抽出来是为了**两处共用**：
+    - `match_experience`（自由文本 / 拼接后的结构化经历）
+    - `_build_work_entries`（逐条结构化经历）
+
+    两处规则必须一样 —— 否则「结构化经历版简历」和「自由文本版简历」
+    的筛选结果会不一致。
+    """
+    low = normalize(text or "")
+    hit = []
+    for sk in (requirements or {}).get("skills", []):
+        for a in sk.get("aliases", []):
+            if normalize(a) in low:
+                hit.append(sk["name"])
+                break
+    return sorted(set(hit))
+
+
 def match_experience(requirements, experience_text, user_skills=None):
     """第 3 步：把 JD 要求和用户经历对上。
 
@@ -272,14 +321,8 @@ def match_experience(requirements, experience_text, user_skills=None):
     # 重复贴一遍没有信息量，还把简历撑得很长。
     per_line = []
     for idx, line in enumerate(lines, 1):
-        low = normalize(line)
-        hit = []
-        for sk in requirements.get("skills", []):
-            for a in sk["aliases"]:
-                if normalize(a) in low:
-                    hit.append(sk["name"])
-                    break
-        per_line.append((line, sorted(set(hit)), idx))
+        hit = _hit_skills(line, requirements)
+        per_line.append((line, hit, idx))
 
     # 挑出「命中 JD 要求」的经历 —— 这些是最该写进简历的
     covered = []
@@ -363,45 +406,72 @@ def build_sections(resume_data):
     return sections
 
 
-def optimize_resume(job, profile, template_id="classic"):
+def optimize_resume(job, profile, template_id="classic", experiences=None):
     """跑完四步，返回一份可渲染的简历数据。
 
-    job:      岗位（含 description/JD）
-    profile:  个人画像（profile.yaml）
+    job:        岗位（含 description/JD）
+    profile:    个人画像（profile.yaml）
+    experiences: **结构化经历**列表（公司/职位/起止/bullets）
+                —— 有就用它生成「工作经历」章节（信息更全），
+                没有就退回 profile["experience_text"] 自由文本模式。
     """
     jd = (job.get("description") or "") + "\n" + (job.get("title") or "")
     user_skills = profile.get("skills") or []
     experience_text = profile.get("experience_text") or ""
+    experiences = list(experiences or [])
 
     # 1) 读 JD（这里 JD 已经在 job 里了）
     # 2) 挑要求
     reqs = extract_requirements(jd, user_skills)
     # 3) 对照经历
-    matched = match_experience(reqs, experience_text, user_skills)
+    #
+    # **有结构化经历就用它** —— 它的 bullets 更干净（有公司/职位/时间），
+    # 而且 free-text 里可能有跟结构化经历重复的内容。
+    if experiences:
+        matched = match_experience(
+            reqs, _structured_to_text(experiences), user_skills)
+    else:
+        matched = match_experience(reqs, experience_text, user_skills)
+
+    # **requirements 要先挂进 matched** ——
+    # `_build_work_entries` 靠它逐条判断 bullet 该不该留。
+    # （之前挂晚了 → 拿到的 requirements 是空的 → 所有 bullet 都被丢掉）
+    matched = dict(matched)
+    matched["requirements"] = reqs
 
     # 组装简历
     identity = dict(profile.get("identity") or {})
     identity.setdefault("headline", job.get("title") or "")
 
     # 经历 → 工作经历 / 项目经历
-    # 判据：bullets 里带项目关键词的归项目，其余归工作
     project_kw = ["项目", "负责", "主导", "独立", "从 0 到 1", "0-1"]
-    work_bullets = []
-    project_bullets = []
-    for c in matched["covered"]:
-        if any(k in c["text"] for k in project_kw):
-            project_bullets.append(c)
-        else:
-            work_bullets.append(c)
+
+    if experiences:
+        # **结构化经历** → 直接生成「工作经历」章节
+        # （公司/职位/起止齐全 —— 这是自由文本给不了的）
+        work_entries = _build_work_entries(experiences, matched)
+        # 结构化经历不再靠关键词猜「项目」—— 全归工作经历
+        project_entries = []
+    else:
+        # 自由文本 → 靠关键词猜「项目」还是「工作」
+        work_bullets = []
+        project_bullets = []
+        for c in matched["covered"]:
+            if any(k in c["text"] for k in project_kw):
+                project_bullets.append(c)
+            else:
+                work_bullets.append(c)
+        work_entries = [{"title": "工作经历", "meta": "", "subtitle": "",
+                         "bullets": work_bullets}]
+        project_entries = [{"title": "项目经历", "meta": "", "subtitle": "",
+                            "bullets": project_bullets}]
 
     resume_data = {
         "identity": identity,
         "summary": _build_summary(job, matched, profile),
         "skills": matched["strengths"] or user_skills[:8],
-        "experiences": [{"title": "工作经历", "meta": "", "subtitle": "",
-                         "bullets": work_bullets}],
-        "projects": [{"title": "项目经历", "meta": "", "subtitle": "",
-                      "bullets": project_bullets}],
+        "experiences": work_entries,
+        "projects": project_entries,
         "education": _build_education(profile),
     }
     return {
@@ -409,7 +479,80 @@ def optimize_resume(job, profile, template_id="classic"):
         "requirements": reqs,
         "matched": matched,
         "template_id": template_id,
+        "used_structured": bool(experiences),
     }
+
+
+def _structured_to_text(experiences):
+    """把结构化经历拼成「一行一条」的文本，给 match_experience 用。
+
+    这样**筛选逻辑不用写两遍** —— 结构化经历和自由文本走同一条路。
+    """
+    out = []
+    for e in experiences or []:
+        head = " ".join(x for x in [
+            e.get("company") or "", e.get("title") or "",
+            e.get("start") or "", e.get("end") or "",
+        ] if x)
+        if head:
+            out.append(head)
+        for b in (e.get("bullets") or []):
+            if str(b).strip():
+                out.append(str(b).strip())
+    return "\n".join(out)
+
+
+def _build_work_entries(experiences, matched):
+    """结构化经历 → 简历的「工作经历」条目列表。
+
+    每条经历一个条目（公司·职位 + 起止 + bullets）。
+
+    **bullets 只留命中 JD 要求的** —— 全写进去简历会太长，
+    而简历优化要的就是「针对这个岗位挑最相关的」。
+
+    没命中任何 JD 要求的经历**仍然保留标题**（公司/职位/时间是硬信息），
+    只是不放 bullet —— 那是经历本身的价值，不该因为对不上 JD 就抹掉。
+    """
+    # JD 要求（用于逐条判断 bullet 该不该留）
+    requirements = matched.get("requirements") or {}
+
+    entries = []
+    for e in experiences or []:
+        company = (e.get("company") or "").strip()
+        title = (e.get("title") or "").strip()
+        start = (e.get("start") or "").strip()
+        end = (e.get("end") or "").strip()
+
+        # **职位名里也有技能证据** —— 「Java 后端工程师」命中 Java，
+        # 这是硬事实（比 bullet 里提一句更可靠）。
+        head_hit = _hit_skills(" ".join(x for x in (company, title) if x),
+                               requirements)
+
+        bullets = []
+        for b in (e.get("bullets") or []):
+            text = str(b).strip()
+            if not text:
+                continue
+            # **逐条自己算命中** —— 不能靠「拼接后哪些行命中了」反查，
+            # 那样 basis 序号会变成拼接后的行号（对不上用户填的顺序）。
+            hit = _hit_skills(text, requirements)
+            if not hit:
+                continue
+            bullets.append({"text": text, "basis": "", "matched": hit})
+
+        head = " · ".join(x for x in (company, title) if x)
+        meta = " - ".join(x for x in (start, end) if x)
+        if not head and not bullets:
+            continue
+        entries.append({
+            "title": head or company or title,
+            "meta": meta,
+            "subtitle": "",
+            "bullets": bullets,
+            # 职位命中的技能 —— 供上层判断「这段经历整体和 JD 的相关度」
+            "head_matched": head_hit,
+        })
+    return entries
 
 
 def _build_summary(job, matched, profile):

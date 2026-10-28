@@ -810,11 +810,19 @@ def resume_optimize(body: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "找不到岗位 %s" % job_id}
 
     prof = _read_profile()
-    if not (prof.get("experience_text") or "").strip():
-        return {"ok": False, "error": "还没有填真实经历",
-                "hint": "设置页 → 用户简历 → 填「真实经历」。没有它无法生成简历，也不该编造。"}
+    # **结构化经历优先** ——
+    # 它有公司/职位/起止，是简历「工作经历」章节真正需要的东西；
+    # 自由文本只是兜底。
+    experiences = storage.list_experiences()
+    has_text = bool((prof.get("experience_text") or "").strip())
+    if not experiences and not has_text:
+        return {"ok": False, "error": "还没有填经历",
+                "hint": "设置页 → 用户简历 → 填「结构化经历」"
+                        "（推荐，有公司/职位/起止）或「真实经历」文本。"
+                        "没有它无法生成简历，也不该编造。"}
 
-    out = resume_builder.optimize_resume(job, prof, template_id)
+    out = resume_builder.optimize_resume(job, prof, template_id,
+                                         experiences=experiences)
     sections = resume_builder.build_sections(out["resume"])
     ctx = {"title": "简历", "identity": out["resume"]["identity"], "sections": sections}
     html_final = resume_template.render_html(template_id, dict(ctx, show_basis=False))

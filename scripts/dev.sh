@@ -55,31 +55,35 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/7 单元测试 ==="
+    say "=== 1/8 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/7 桌面端 JS 语法 ==="
+    say "=== 2/8 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/7 桌面端 CSS 类存在性 ==="
+    say "=== 3/8 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/7 桌面端 jsx children 位置 ==="
+    say "=== 4/8 桌面端 jsx children 位置 ==="
     cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
 
     say ""
-    say "=== 5/7 脱敏扫描 ==="
+    say "=== 5/8 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 6/7 桌面端表单交互 ==="
+    say "=== 6/8 桌面端表单交互 ==="
     cmd_check_form_input || die "桌面端表单输入有问题（打字打不进去 / 技能加不上）"
 
     say ""
-    say "=== 7/7 仓库卫生 ==="
+    say "=== 7/8 岗位推荐折叠 ==="
+    cmd_check_job_collapse || die "岗位推荐折叠有问题（不是前 5 条 / 展开收起坏了）"
+
+    say ""
+    say "=== 8/8 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
 
     ok "全部检查通过"
@@ -147,6 +151,40 @@ cmd_check_form_input() {
     [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
     if [ -z "$node_exe" ]; then
         warn "找不到 node，跳过桌面端表单检查"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$target"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$target")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
+}
+
+# 岗位推荐的「更多岗位」折叠 —— 真实渲染验证。
+#
+# **为什么必须真渲染**：折叠逻辑分散在好几个地方
+# （排序 / 切片 / 按钮显示条件 / 展开收起状态），
+# 而且很容易踩 **const 暂时性死区**：
+# 把 `topJobs` 算在 `showAllJobs` 声明之前 →
+# 「Cannot access 'showAllJobs' before initialization」
+# → **整页白屏**，而且只在运行时才炸。
+cmd_check_job_collapse() {
+    local checker="$SCRIPT_DIR/verify-job-collapse.mjs"
+    local target="$PLUGIN_DIR/desktop/plugin.js"
+    [ -f "$checker" ] || { warn "找不到 verify-job-collapse.mjs，跳过"; return 0; }
+    [ -f "$target" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过岗位折叠检查"
         return 0
     fi
 

@@ -1338,7 +1338,20 @@ function RecommendView({ ctx, cfg }) {
   // 字段和「设置」页共用 FilterFields —— 同一个东西不该两处长得不一样。
   const qc = useQueryClient()
   const [advOpen, setAdvOpen] = React.useState(false)
+  // 「更多岗位」折叠 —— 默认只显示分数最高的 5 条。
+  const [showAllJobs, setShowAllJobs] = React.useState(false)
   const [local, setLocal] = React.useState(settings)
+
+  // **后端已按 score 倒序**（ORDER BY score DESC），
+  // 但这里再排一次 —— 前端不能假设后端的顺序。
+  //
+  // **注意位置** —— 必须在 `showAllJobs` 声明之后，
+  // 否则 const 的暂时性死区会直接抛
+  // 「Cannot access 'showAllJobs' before initialization」（整页白屏）。
+  const ranked = jobs.slice().sort((a, b) => (b.score || 0) - (a.score || 0))
+  const TOP_N = 5
+  const topJobs = showAllJobs ? ranked : ranked.slice(0, TOP_N)
+  const restCount = Math.max(0, ranked.length - TOP_N)
   React.useEffect(() => { setLocal(settings) }, [settings])
   const save = useMutation({
     mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
@@ -1358,7 +1371,7 @@ function RecommendView({ ctx, cfg }) {
         hint: jobsQ.isLoading ? '加载中…' : ('命中 ' + jobs.length + ' 条'),
         actions: jsx(Button, {
           size: 'sm',
-          variant: advOpen ? 'primary' : 'outline',
+          variant: 'outline',
           onClick: () => setAdvOpen((v) => !v),
           children: advOpen ? '收起' : '高级',
         }),
@@ -1379,7 +1392,21 @@ function RecommendView({ ctx, cfg }) {
               ? jsx(ErrorState, { message: String(jobsQ.error) })
               : jobs.length === 0
                 ? jsx(EmptyState, { title: '还没有岗位', description: '跑一次抓取就会出现' })
-                : jsxs('div', { children: jobs.map((j, i) => jsx(JobCard, { key: j.job_id || i, job: j, ctx })) }),
+                : jsxs('div', { children: [
+                    topJobs.map((j, i) => jsx(JobCard, { job: j, ctx }, j.job_id || i)),
+                    // 其余的折叠起来 —— 「更多岗位」
+                    restCount > 0 && jsx('div', {
+                      className: 'border-t border-(--ui-stroke-tertiary) px-4 py-2',
+                      children: jsx(Button, {
+                        size: 'sm',
+                        variant: 'outline',
+                        onClick: () => setShowAllJobs((v) => !v),
+                        children: showAllJobs
+                          ? '收起（只显示前 ' + TOP_N + ' 条）'
+                          : '更多岗位（还有 ' + restCount + ' 条）',
+                      }),
+                    }),
+                  ] }),
         ] }),
       }),
       jsx('div', { className: 'h-3' }),
@@ -2272,7 +2299,7 @@ function ResumeView({ ctx, cfg }) {
       hint: '投递成功的简历会自动存进这里并打标签',
       children: resumes.length
         ? jsxs('div', { className: 'flex flex-col divide-y divide-y [&>*+*]:border-t [&>*+*]:border-(--ui-stroke-tertiary)', children:
-            resumes.map((r) => jsx(ResumeRow, { key: r.resume_id, resume: r }))
+            resumes.map((r) => jsx(ResumeRow, { resume: r }, r.resume_id))
           })
         : jsx(EmptyState, {
             title: '还没有简历档案',
@@ -2359,7 +2386,7 @@ function ResumeRow({ resume }) {
     jsxs('div', { className: 'min-w-0 flex-1', children: [
       jsx('div', { className: 'truncate text-xs font-medium', children: resume.title }),
       jsx('div', { className: 'mt-1 flex flex-wrap items-center gap-1.5', children:
-        tags.map((tg) => jsx(Badge, { key: tg, variant: 'muted', children: tg }))
+        tags.map((tg) => jsx(Badge, { variant: 'muted', children: tg }, tg))
       }),
       jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children:
         (resume.source === 'applied' ? '投递生成' : resume.source === 'optimized' ? '匹配优化' : '手动上传')
