@@ -1182,22 +1182,41 @@ def save_apply_switches(body: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/experiences")
 def list_experiences() -> Dict[str, Any]:
-    """结构化的经历列表（公司 / 起止 / 职位 / 分条）。"""
+    """结构化的经历列表（公司 / 起止 / 职位 / 分条）。
+
+    **默认走 SQLite** —— 之前放在 mock 的内存里，
+    进程重启就全丢，而且多条记录会共用空 id，
+    新增一条就把旧的挤掉。
+    """
     mock = _mock()
-    return {"ok": True, "experiences": mock.experiences(), "mock": mock.enabled()}
+    if mock.enabled():
+        return {"ok": True, "experiences": mock.experiences(), "mock": True}
+    storage = _sibling("storage")
+    return {"ok": True, "experiences": storage.list_experiences(), "mock": False}
 
 
 @router.post("/experiences")
 def save_experience(body: Dict[str, Any]) -> Dict[str, Any]:
-    """新增或更新一条经历。"""
-    mock = _mock()
+    """新增或更新一条经历。
+
+    **空 id 会生成新的** —— 前端新增时传 `id: ''`，
+    直接拿它当主键会把同 id 的旧记录顶掉。
+    """
     exp = body.get("experience") or {}
     if not (exp.get("company") or "").strip():
         return {"ok": False, "error": "缺少公司名"}
-    if not (exp.get("bullets") or []):
+    bullets = [b for b in (exp.get("bullets") or []) if str(b).strip()]
+    if not bullets:
         return {"ok": False, "error": "至少要有一条经历描述"}
+    exp = dict(exp)
+    exp["bullets"] = bullets
+
+    mock = _mock()
     try:
-        saved = mock.upsert_experience(exp)
+        if mock.enabled():
+            saved = mock.upsert_experience(exp)
+        else:
+            saved = _sibling("storage").upsert_experience(exp)
         return {"ok": True, "experience": saved}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -1207,8 +1226,14 @@ def save_experience(body: Dict[str, Any]) -> Dict[str, Any]:
 def delete_experience(exp_id: str) -> Dict[str, Any]:
     """删一条经历。"""
     mock = _mock()
-    ok = mock.delete_experience(exp_id)
-    return {"ok": ok}
+    try:
+        if mock.enabled():
+            ok = mock.delete_experience(exp_id)
+        else:
+            ok = _sibling("storage").delete_experience(exp_id)
+        return {"ok": ok}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
 
 
 # ── ③ 模板转换 ──────────────────────────────────────────────────────────────

@@ -56,6 +56,22 @@ CREATE TABLE IF NOT EXISTS runs (
   fetched INTEGER, matched INTEGER, new_jobs INTEGER, error TEXT
 );
 
+-- 结构化经历（公司 / 职位 / 起止 / 分条描述）
+--
+-- **必须落库**，不能放内存 ——
+-- 放内存的话：进程重启全丢，而且多条记录会共用同一个 id，
+-- 新增一条就把旧的挤掉（前端新增时传的 id 是空字符串）。
+CREATE TABLE IF NOT EXISTS experiences (
+  id TEXT PRIMARY KEY,
+  company TEXT,
+  title TEXT,
+  start TEXT,
+  end TEXT,
+  bullets TEXT,          -- JSON 数组
+  tags TEXT,             -- JSON 数组
+  created TEXT
+);
+
 -- 投递三道门：一次性确认令牌
 CREATE TABLE IF NOT EXISTS apply_tokens (
   token TEXT PRIMARY KEY,
@@ -321,6 +337,90 @@ def list_resumes(limit: int = 50) -> List[dict]:
         d["tags"] = _load_list(d.get("tags"))
         out.append(d)
     return out
+
+
+def list_experiences() -> List[dict]:
+    """全部结构化经历（按创建时间倒序 —— 新的在前）。"""
+    with _conn() as c:
+        c.row_factory = sqlite3.Row
+        rows = c.execute(
+            "SELECT * FROM experiences ORDER BY created DESC, rowid DESC"
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["bullets"] = _load_list(d.get("bullets"))
+        d["tags"] = _load_list(d.get("tags"))
+        out.append(d)
+    return out
+
+
+def upsert_experience(exp: dict) -> dict:
+    """新增或更新一条经历。
+
+    ## id 怎么来的
+
+    **空 id 一律生成新的** —— 前端新增时传的是 `id: ''`（空字符串），
+    而 `dict.setdefault("id", ...)` **在 key 存在时不会覆盖**，
+    于是空字符串被当成真 id 用：
+    `[e for e in list if e["id"] != exp["id"]]` 把所有空 id 的都删掉
+    → **新增一条就把旧的挤掉**。
+
+    所以这里**不用 setdefault**，而是显式判断「id 为空就生成」。
+
+    生成方式用 uuid 而不是 `exp-N` —— 序号在删除后会撞
+    （删掉一条，长度不变 → 下次生成的 id 和之前一样）。
+    """
+    import json
+
+    exp = dict(exp or {})
+    exp_id = str(exp.get("id") or "").strip()
+    if not exp_id:
+        exp_id = "exp-" + uuid.uuid4().hex[:12]
+
+    bullets = exp.get("bullets") or []
+    tags = exp.get("tags") or []
+
+    with _conn() as c:
+        # 有这个 id → 更新；没有 → 插入。
+        # **不能**用 ON CONFLICT DO UPDATE 吗？可以，但要先判断存在，
+        # 因为 created 要保持原值（更新不该改创建时间）。
+        row = c.execute(
+            "SELECT created FROM experiences WHERE id = ?", (exp_id,)
+        ).fetchone()
+        created = row[0] if row else (exp.get("created") or _now())
+        c.execute(
+            """INSERT INTO experiences
+               (id, company, title, start, end, bullets, tags, created)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(id) DO UPDATE SET
+                 company=excluded.company, title=excluded.title,
+                 start=excluded.start, end=excluded.end,
+                 bullets=excluded.bullets, tags=excluded.tags""",
+            (
+                exp_id,
+                exp.get("company") or "",
+                exp.get("title") or "",
+                exp.get("start") or "",
+                exp.get("end") or "",
+                json.dumps(list(bullets), ensure_ascii=False),
+                json.dumps(list(tags), ensure_ascii=False),
+                created,
+            ),
+        )
+    out = dict(exp)
+    out["id"] = exp_id
+    out["bullets"] = list(bullets)
+    out["tags"] = list(tags)
+    out["created"] = created
+    return out
+
+
+def delete_experience(exp_id: str) -> bool:
+    """删一条经历。返回是否真的删掉了。"""
+    with _conn() as c:
+        cur = c.execute("DELETE FROM experiences WHERE id = ?", (exp_id,))
+        return cur.rowcount > 0
 
 
 def upsert_template(tpl: dict) -> None:

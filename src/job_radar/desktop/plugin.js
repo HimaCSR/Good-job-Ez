@@ -291,6 +291,19 @@ function PhotoUpload({ ctx }) {
  *
  * 描述只能从用户自己写的内容里来 —— 不给编造的入口。
  */
+// 去掉对象里的 id 字段（返回新对象，不改原对象）。
+//
+// **不要用解构 `const { id, ...rest } = exp`** ——
+// 那个写法在 JSX 编译产物里容易被静态检查误判成未定义标识符，
+// 而且这里根本不需要那么绕。
+function _without_id(obj) {
+  const out = {}
+  for (const k of Object.keys(obj || {})) {
+    if (k !== 'id') out[k] = obj[k]
+  }
+  return out
+}
+
 function ExperienceEditor({ ctx }) {
   const qc = useQueryClient()
   const q = useQuery({
@@ -306,7 +319,10 @@ function ExperienceEditor({ ctx }) {
   const save = async (exp) => {
     setBusy(true)
     try {
-      const r = await ctx.rest('/experiences', { method: 'POST', body: { experience: exp } })
+      // **没有 id 就别把这个键带上去** ——
+      // 空字符串会被当成真 id 用（详见 setEditing 那里的注释）。
+      const payload = exp.id ? exp : _without_id(exp)
+      const r = await ctx.rest('/experiences', { method: 'POST', body: { experience: payload } })
       if (!r || r.ok === false) {
         host.notify({ kind: 'error', message: (r && r.error) || '保存失败' })
         return
@@ -373,7 +389,10 @@ function ExperienceEditor({ ctx }) {
 
   const addBtn = jsx('button', {
     type: 'button',
-    onClick: () => setEditing({ id: '', company: '', title: '', start: '', end: '', bullets: [''] }),
+    // **id 用 null，不空字符串** ——
+    // 空字符串会被后端当成「一个真实的 id」，
+    // 于是 upsert 把同 id 的旧记录顶掉 → **新增一条就把旧的挤掉**。
+    onClick: () => setEditing({ id: null, company: '', title: '', start: '', end: '', bullets: [''] }),
     className: 'rounded-md border border-dashed border-(--ui-stroke-tertiary) px-3 py-1.5 text-[0.6875rem] text-(--ui-text-tertiary) hover:border-(--ui-stroke-tertiary)',
     children: '＋ 添加一段经历',
   })

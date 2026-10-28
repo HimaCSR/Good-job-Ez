@@ -272,10 +272,24 @@ def experiences():
 
 
 def upsert_experience(exp):
-    """保存一条经历（mock：内存里）。"""
+    """保存一条经历（mock：内存里）。
+
+    ## 空 id 要生成新的
+
+    **不能用 `setdefault`** —— 前端新增时传的是 `id: ''`（空字符串），
+    而 `setdefault` 在 **key 存在**时不会覆盖 → 空字符串被当成真 id：
+    `[e for e in list if e["id"] != exp["id"]]` 把所有空 id 的都删掉
+    → **新增一条就把旧的挤掉**。
+
+    也不能用 `exp-N` 序号 —— 删过一条后长度不变 → 下次生成的 id 会撞。
+    所以用 uuid。
+    """
     exp = dict(exp)
-    exp.setdefault("id", "exp-%d" % (len(_EXPERIENCES) + 1))
-    _EXPERIENCES[:] = [e for e in _EXPERIENCES if e["id"] != exp["id"]]
+    exp_id = str(exp.get("id") or "").strip()
+    if not exp_id:
+        exp_id = "exp-" + uuid.uuid4().hex[:12]
+    exp["id"] = exp_id
+    _EXPERIENCES[:] = [e for e in _EXPERIENCES if e["id"] != exp_id]
     _EXPERIENCES.append(exp)
     return exp
 
