@@ -503,6 +503,7 @@ function ProfileView({ ctx, cfg, onSaved }) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['job-radar', 'config'] })
       host.notify({ kind: 'success', message: '个人信息已保存' })
+      setDirty(false)
       onSaved && onSaved()
     },
     onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
@@ -523,6 +524,10 @@ function ProfileView({ ctx, cfg, onSaved }) {
   )
   const [local, setLocal] = React.useState(profile)
   const lastKey = React.useRef(profileKey)
+  // **有未保存的改动吗** ——
+  // 填了东西没保存，用户看不出来 → 以为没生效。
+  // 按钮旁给一句提示（「有改动未保存」/「已保存」）。
+  const [dirty, setDirty] = React.useState(false)
   React.useEffect(() => {
     // 只有**服务端数据真的变了**才重置本地编辑
     if (profileKey !== lastKey.current) {
@@ -531,16 +536,22 @@ function ProfileView({ ctx, cfg, onSaved }) {
     }
   }, [profileKey, profile])
 
-  const set = (k, v) => setLocal((s) => ({ ...s, [k]: v }))
+  const set = (k, v) => {
+    setDirty(true)
+    setLocal((s) => ({ ...s, [k]: v }))
+  }
   const identity = local.identity || {}
   // **set 的第一个参数是键名** ——
   // 之前这里写的是 `set((s) => ...)`，把**函数**当成键名传进去了，
   // 于是 `local.identity` 根本没被改 → **姓名/电话/邮箱/学历/院校/专业
   // 六个字段全都打不进字**（症状：输入框里怎么敲都是空的）。
-  const setIdentity = (k, v) => setLocal((s) => ({
-    ...s,
-    identity: { ...(s.identity || {}), [k]: v },
-  }))
+  const setIdentity = (k, v) => {
+    setDirty(true)
+    setLocal((s) => ({
+      ...s,
+      identity: { ...(s.identity || {}), [k]: v },
+    }))
+  }
 
   if (!profile || !Object.keys(profile).length) {
     return jsx(ErrorState, { message: '读不到个人画像' })
@@ -551,6 +562,29 @@ function ProfileView({ ctx, cfg, onSaved }) {
       jsx(Panel, {
         title: '身份信息',
         hint: '仅用于简历生成表单',
+
+        // **保存按钮放第一个面板** ——
+        // 用户填完姓名/电话就找保存，找不到就会以为没生效。
+        // （之前只在「真实经历」面板有 —— 用户填完上面三个面板，
+        //   根本不知道要往下滚到哪去找保存。）
+        actions: jsxs('div', {
+          className: 'flex items-center gap-2',
+          children: [
+            // **未保存提示** —— 填了没保存要看得见，
+            // 否则用户以为「填了没生效」。
+            jsx('span', {
+              className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+              children: dirty ? '有改动，未保存' : '',
+            }),
+            jsx(Button, {
+              size: 'sm',
+              variant: 'default',
+              disabled: save.isPending,
+              onClick: () => save.mutate(local),
+              children: save.isPending ? '保存中…' : '保存个人信息',
+            }),
+          ],
+        }),
         children: jsxs('div', {
           className: 'grid grid-cols-2 gap-4',
           children: [
@@ -611,6 +645,16 @@ function ProfileView({ ctx, cfg, onSaved }) {
             }),
           ],
         }),
+      }),
+      jsx('div', { className: 'h-3' }),
+      // **说明各面板的保存方式** ——
+      // 「保存个人信息」只管表单里的字段；
+      // 证件照和结构化经历是**各自单独保存**的。
+      jsx('p', {
+        className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+        children: '「保存个人信息」保存的是姓名、联系方式、技能、城市、'
+          + '期望薪资和「真实经历」里的文字。证件照和「结构化经历」'
+          + '是各自单独保存的 —— 证件照上传即存，经历添加即存。',
       }),
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
@@ -675,13 +719,6 @@ function ProfileView({ ctx, cfg, onSaved }) {
       jsx(Panel, {
         title: '真实经历',
         hint: '简历定向优化的唯一原料',
-        actions: jsx(Button, {
-          size: 'sm',
-          variant: 'default',
-          disabled: save.isPending,
-          onClick: () => save.mutate(local),
-          children: save.isPending ? '保存中…' : '保存',
-        }),
         children: jsxs('div', {
           className: 'flex flex-col gap-1.5',
           children: [
@@ -703,6 +740,26 @@ function ProfileView({ ctx, cfg, onSaved }) {
         title: '结构化经历',
         hint: '公司 / 职位 / 起止 —— 简历「工作经历」章节靠它',
         children: jsx(ExperienceEditor, { ctx }),
+      }),
+      // **末尾再放一个保存入口** ——
+      // 用户填完「真实经历」「结构化经历」往下滚到底就能保存，
+      // 不用再滚回顶部找按钮。
+      jsx('div', { className: 'h-3' }),
+      jsxs('div', {
+        className: 'flex items-center justify-end gap-2',
+        children: [
+          jsx('span', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: dirty ? '有改动，未保存' : '',
+          }),
+          jsx(Button, {
+            size: 'sm',
+            variant: 'default',
+            disabled: save.isPending,
+            onClick: () => save.mutate(local),
+            children: save.isPending ? '保存中…' : '保存个人信息',
+          }),
+        ],
       }),
     ],
   })
