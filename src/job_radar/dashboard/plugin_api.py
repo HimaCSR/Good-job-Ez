@@ -46,6 +46,8 @@ _SIBLINGS = (
     "logging_setup", "resume_template", "resume_builder", "resume_store",
     "mock_provider", "apply_gate", "browser_session",
     "template_convert", "template_store", "city_codes",
+    # **BOSS 城市码表** —— `/cities` 要返回两站并集
+    "boss_city_codes",
 )
 
 
@@ -1037,17 +1039,42 @@ def rescore_all_jobs() -> Dict[str, Any]:
 
 @router.get("/cities")
 def list_cities() -> Dict[str, Any]:
-    """智联城市码表（城市名 → jl 码）。
+    """城市列表（城市名 → 码）。
 
-    **前端给用户城市名，不给码** ——
-    用户不知道「南宁 = 3150」，但看得懂「南宁」。
+    **前端给用户城市名，不给码** —— 用户不知道「南宁 = 3150」，但看得懂「南宁」。
 
-    码是**实测**出来的（不是抄的）：逐个码跑真实抓取，
-    看返回岗位的 `area` 城市名对不对。
+    ## 两个站的码表**取并集**
+
+    智联 3~4 位 `jl` 码、BOSS 9 位 `city` 码，**完全不是一个体系**
+    （重庆：智联 551 / BOSS 101040100）。
+
+    但**前端只关心城市名**（码是后端抓取时才翻译的），
+    所以这里直接给**并集** —— 用户在设置页选「成都」，
+    启用 BOSS 时用 BOSS 的码，启用智联时用智联的码。
+
+    **某站没有的城市，那个站就跳过**（`cities_to_codes` 会过滤掉）。
+
+    码都是**实测**出来的（不是抄的）：
+    - 智联：逐个码跑真实抓取，看返回岗位的 `area` 城市名
+    - BOSS：官方接口 `city/site.json` 交叉核对 + 逐个实测
     """
     try:
         cc = _sibling("city_codes")
-        return {"ok": True, "cities": cc.known_cities()}
+        merged = {}
+        try:
+            bcc = _sibling("boss_city_codes")
+        except Exception:
+            bcc = None
+        for src in (cc, bcc):
+            if src is None:
+                continue
+            try:
+                for item in src.known_cities():
+                    merged[item["name"]] = item
+            except Exception:
+                continue
+        cities = [merged[name] for name in sorted(merged)]
+        return {"ok": True, "cities": cities}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 

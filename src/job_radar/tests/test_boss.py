@@ -46,6 +46,7 @@ BOSS 和智联**完全不是一个体系**：
 """
 
 import os
+import re
 import sys
 import unittest
 
@@ -169,6 +170,61 @@ class TestBossScanCityRouting(unittest.TestCase):
         src = inspect.getsource(getattr(tools, "_fetch_site"))
         self.assertIn("ensure_boss_context", src,
                       "_fetch_site 抓 BOSS 前没调 ensure_boss_context")
+
+
+class TestCitiesEndpoint(unittest.TestCase):
+    """`/cities` 要返回**两个站的并集**。
+
+    ## 为什么
+
+    智联 3~4 位 `jl` 码、BOSS 9 位 `city` 码 —— 完全不是一个体系。
+    但**前端只关心城市名**（码是后端抓取时才翻译的）。
+
+    所以 `/cities` 给并集：用户在设置页选「成都」，
+    启用 BOSS 时用 BOSS 的码，启用智联时用智联的码。
+    **某站没有的城市，那个站就跳过。**
+
+    ## 不做会怎样
+
+    只返回智联码表 → 用户在设置页**选不到成都/西安/武汉**
+    （智联码表里没有）→ 明明 BOSS 支持这些城市。
+
+    注意：`CityPicker` 只用 `c.name`，**不关心 code 是哪套** ——
+    所以前端一行都不用改。
+    """
+
+    def test_api_source_mentions_both_tables(self):
+        """`/cities` 要读两套码表。"""
+        here = os.path.dirname(os.path.abspath(__file__))
+        api = os.path.join(os.path.dirname(here), "dashboard", "plugin_api.py")
+        with open(api, encoding="utf-8") as fh:
+            src = fh.read()
+        i = src.find('@router.get("/cities")')
+        self.assertGreater(i, 0, "找不到 /cities 端点")
+        block = src[i:i + 2000]
+        self.assertIn("city_codes", block, "/cities 没读智联码表")
+        self.assertIn("boss_city_codes", block, "/cities 没读 BOSS 码表")
+
+    def test_boss_city_codes_registered_as_sibling(self):
+        """**必须在 `_SIBLINGS` 里注册** —— 否则 `_sibling()` 抛 ImportError。"""
+        here = os.path.dirname(os.path.abspath(__file__))
+        api = os.path.join(os.path.dirname(here), "dashboard", "plugin_api.py")
+        with open(api, encoding="utf-8") as fh:
+            src = fh.read()
+        m = re.search(r"_SIBLINGS\s*=\s*\((.*?)\n\)", src, re.S)
+        self.assertIsNotNone(m)
+        registered = set(re.findall(r'"([\w]+)"', m.group(1)))
+        self.assertIn("boss_city_codes", registered,
+                      "boss_city_codes 没注册 —— /cities 会 500")
+
+    def test_union_contains_both_only_cities(self):
+        """并集里既有智联独有的，也有 BOSS 独有的。"""
+        from city_codes import CITY_CODES as ZL
+        from boss_city_codes import CITY_CODES as BOSS
+        zl_only = set(ZL) - set(BOSS)
+        boss_only = set(BOSS) - set(ZL)
+        self.assertTrue(zl_only, "两站码表应该不完全一样")
+        self.assertTrue(boss_only, "BOSS 应该有些智联没有的城市")
 
 
 class TestLocalAdapter(unittest.TestCase):
