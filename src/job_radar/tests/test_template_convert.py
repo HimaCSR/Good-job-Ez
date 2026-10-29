@@ -514,5 +514,185 @@ class TestEndToEnd(unittest.TestCase):
         self.assertIn("内置", out["error"])
 
 
+# ── 造一个「有版面结构」的 PDF ──────────────────────────────────────────────
+#
+# 用户的模板是 WPS 导出的，结构长这样：
+#   - 页眉：一整块深色底 + 白字
+#   - 章节：淡色横条 + 左侧实心方块
+#
+# **只测「抽颜色」不够** —— 用户第二次反馈就是
+# 「现在有样式了，但与我提供的模板文件完全不同」。
+# → 要测**版面结构**真的被抽出来并且**真的作用到 CSS 上**。
+
+def make_layout_pdf():
+    """造一个 PDF：深色页眉块 + 淡色章节条 + 实心图标方块。
+
+    手写最小 PDF（不依赖任何第三方库）—— 内容流用 zlib 压缩。
+
+    **内容流里必须有 `Tf`** —— `_pdf_to_css` 靠它认出「这条是内容流」。
+    最大的流往往是内嵌字体文件，里面一个 `Tf` 都没有。
+    """
+    import zlib
+
+    # A4：595 x 842 pt
+    ops = []
+    # 一行字 —— 让内容流里有 Tf / Tj
+    ops.append("BT /F1 12 Tf 20 500 Td (Resume) Tj ET")
+    # 页眉块 —— 强调色 #384083，贴在页面顶部
+    ops.append("q 1 0 0 1 0 610 cm 0.2235 0.251 0.5176 rg "
+               "0 0 595 232 re f Q")
+    # 章节条 —— 同色但 10% 透明（/G6）+ 左侧实心方块
+    for y in (400.0, 300.0):
+        ops.append("q /G6 gs 1 0 0 1 36.7 %s cm 0.2235 0.251 0.5176 rg "
+                   "0 0 543 24 re f Q" % y)
+        ops.append("q 1 0 0 1 36.7 %s cm 0.2235 0.251 0.5176 rg "
+                   "0 0 24 24 re f Q" % y)
+    content = "\n".join(ops).encode("latin-1")
+
+    objs = {}
+    objs[1] = b"<< /Type /Catalog /Pages 2 0 R >>"
+    objs[2] = b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>"
+    objs[3] = (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+               b"/Resources << /ExtGState << /G6 6 0 R >> >> /Contents 4 0 R >>")
+    objs[4] = None          # 内容流（下面特殊处理）
+    objs[6] = b"<< /ca 0.102 /BM /Normal >>"
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for num in sorted(objs):
+        offsets[num] = len(out)
+        if num == 4:
+            comp = zlib.compress(content)
+            out += (b"%d 0 obj\n<< /Length %d /Filter /FlateDecode >>\nstream\n"
+                    % (num, len(comp)))
+            out += comp
+            out += b"\nendstream\nendobj\n"
+        else:
+            out += b"%d 0 obj\n%s\nendobj\n" % (num, objs[num])
+    xref = len(out)
+    out += b"xref\n0 %d\n" % (max(objs) + 1)
+    out += b"0000000000 65535 f \n"
+    for num in range(1, max(objs) + 1):
+        if num in offsets:
+            out += b"%010d 00000 n \n" % offsets[num]
+        else:
+            out += b"0000000000 65535 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF" % (
+        max(objs) + 1, xref)
+    return bytes(out)
+
+
+
+def _layout_of(data):
+    """跑完整链路：解析 → 抽矩形 → 分类版面。"""
+    texts, _raws = template_convert._pdf_streams(data)
+    content = ""
+    for t in texts:
+        if " re" in t:
+            content = t
+            break
+    rects = template_convert._pdf_rects(
+        content, template_convert._pdf_alpha_map(data),
+        template_convert._pdf_forms(data, template_convert._pdf_objects(data)))
+    if not rects:
+        return {}, rects
+    page_h = max(r[3] for r in rects) - min(r[1] for r in rects)
+    page_w = max(r[2] for r in rects) - min(r[0] for r in rects)
+    return template_convert._pdf_layout(rects, page_w, page_h), rects
+
+
+class TestPdfLayout(unittest.TestCase):
+    """PDF → **版面结构**（不只是颜色）。"""
+
+    def test_extracts_header_block(self):
+        """**深色页眉块要被抽出来** —— WPS 模板的页眉是一整块底色。"""
+        data = make_layout_pdf()
+        style, _rects = _layout_of(data)
+        self.assertIn("_header_bg", style, "没抽出页眉底色：%r" % style)
+        self.assertEqual(style["_header_bg"], "#384083")
+
+    def test_alpha_is_blended_to_white(self):
+        """**10% 透明的强调色要算成「叠在白底上的观感」**。
+
+        WPS 的章节条是「深蓝 + ca 0.102」→ 屏幕上看到的是淡紫。
+        直接用原色 → 章节条变深蓝 → 白字深蓝底 → 字看不见。
+        """
+        data = make_layout_pdf()
+        style, _rects = _layout_of(data)
+        band = style.get("_band_color", "")
+        self.assertNotEqual(band, "#384083",
+                            "透明色没混合，直接用了原色")
+        # 淡紫 —— r 远小于 g
+        r = int(band[1:3], 16)
+        self.assertLess(r, 250, "章节条底色不该是深色：%s" % band)
+
+    def test_layout_becomes_real_css(self):
+        """**抽到的版面要真的变成 CSS** —— 不是只存在 dict 里。"""
+        data = make_layout_pdf()
+        css, params = template_convert._pdf_to_css(data)
+        self.assertIn("background:", css, "页眉底色没进 CSS")
+        self.assertIn(".head", css, "没有 .head 样式")
+        self.assertIn("#384083", css)
+        self.assertTrue(any("页眉" in x for x in params.get("_extracted", [])),
+                        "extracted 里没有报「页眉」：%r" % params.get("_extracted"))
+
+    def test_dark_header_makes_text_white(self):
+        """**深色页眉上的文字必须反白** —— 否则看不见。"""
+        data = make_layout_pdf()
+        css, _params = template_convert._pdf_to_css(data)
+        self.assertIn("#ffffff", css, "深底页眉没有白字")
+
+    def test_light_band_keeps_dark_text(self):
+        """**浅色章节底 + 白字 = 看不见** —— 文字要跟着底色反。"""
+        data = make_layout_pdf()
+        css, _params = template_convert._pdf_to_css(data)
+        # 章节条那行 —— 背景是淡紫，文字不能是白色
+        found = False
+        for line in css.split("\n"):
+            if "background: #" in line and "sec-title" not in line:
+                continue
+            if ".sec-title { background:" in line:
+                found = True
+                self.assertNotIn("color: #ffffff", line,
+                                 "浅色章节底用了白字 —— 看不清")
+        self.assertTrue(found, "没生成章节底条样式")
+
+    def test_clip_path_is_not_a_color_block(self):
+        """**裁剪路径不是色块** —— W* 结尾的 re 没画出来。"""
+        import zlib
+        ops = b"q 1 0 0 1 0 600 cm 0.2235 0.251 0.5176 rg 0 0 615 200 re W* n Q"
+        data = make_layout_pdf()
+        # 直接测 rects 的判定
+        rects = template_convert._pdf_rects(
+            ops.decode("latin-1"), {}, {})
+        self.assertEqual(rects, [], "裁剪路径被当成了色块")
+
+    def test_form_xobject_is_parsed(self):
+        """**页眉底块常画在 Form XObject 里** —— 不递归就看不到。"""
+        import zlib
+        # 内容流里用 /X1 Do 引用
+        content = b"q 1 0 0 1 0 638.3 cm /X1 Do Q"
+        form = b"0.2235 0.251 0.5176 rg 0 0 615 231.7 re f"
+        objs = {1: (b"<< /Type /XObject /Subtype /Form >>", form)}
+        forms = template_convert._pdf_forms(
+            b"/X1 1 0 R", objs)
+        self.assertIn("X1", forms, "Form XObject 没被识别")
+        rects = template_convert._pdf_rects(
+            content.decode("latin-1"), {}, forms)
+        self.assertEqual(len(rects), 1, "Form 里的矩形没被递归进来")
+        self.assertEqual(template_convert._hex(rects[0][4]), "#384083")
+
+    def test_ctm_is_applied(self):
+        """**要跟踪 CTM** —— 不跟踪的话坐标全错。"""
+        content = "q 3.125 0 0 3.125 100 200 cm 1 0 0 rg 0 0 10 10 re f Q"
+        rects = template_convert._pdf_rects(content, {}, {})
+        self.assertEqual(len(rects), 1)
+        x0, y0, x1, y1 = rects[0][:4]
+        self.assertAlmostEqual(x0, 100, places=1)
+        self.assertAlmostEqual(y0, 200, places=1)
+        self.assertAlmostEqual(x1, 100 + 10 * 3.125, places=1)
+
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

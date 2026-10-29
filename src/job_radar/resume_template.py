@@ -82,7 +82,28 @@ body {
 }
 
 /* ── 抬头 ── */
-.head { margin-bottom: 14px; }
+.head { margin-bottom: 14px; position: relative; }
+
+/* 证件照 —— 页眉右上角圆形。
+   **没有照片时整个 div 都不渲染**，所以不会留下空白占位。
+
+   ⚠️ **CSS 注释里不能出现 Jinja 标签** ——
+   CSS 注释（斜杠星号）里的 Jinja 标签**照样会被解析**。
+   本机踩过：注释里写了一个 if 标签 → Jinja 找不到对应的 endif
+   → TemplateSyntaxError: Unexpected end of template。
+
+   **教训**：要提 Jinja 标签，就写在花括号井号注释里，
+   或者干脆用文字描述（像这里这样）。 */
+.photo {
+  position: absolute; top: 0; right: 0;
+  width: 22mm; height: 22mm; overflow: hidden;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px rgba(0,0,0,.08);
+}
+.photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* 有照片时，正文别压到照片下面 */
+.head:has(.photo) .name { padding-right: 24mm; }
+.head:has(.photo) .contact { padding-right: 24mm; }
 .name { font-size: 24px; font-weight: 700; letter-spacing: .5px; }
 .sub { font-size: 12px; color: #555; margin-top: 3px; }
 .contact { font-size: 11.5px; color: #444; margin-top: 5px; }
@@ -132,6 +153,8 @@ body {
   {% if bg_image %}<div class="bg-image" style="background-image: url('{{ bg_image }}')"></div>{% endif %}
   <div class="content">
   <div class="head">
+    {# 证件照 —— 放在页眉右上角（圆形）。没有照片就不占位。 #}
+    {% if photo %}<div class="photo"><img src="{{ photo }}" alt="证件照"></div>{% endif %}
     <div class="name">{{ identity.name or "姓名" }}</div>
     {% if identity.headline %}<div class="sub">{{ identity.headline }}</div>{% endif %}
     <div class="contact">
@@ -279,6 +302,72 @@ def _uploaded_css(template_id):
         return fh.read()
 
 
+# 证件照的 data URI 缓存
+#
+# **为什么要缓存** —— 证件照 1~2 MB，base64 后 1.4~2.7 MB。
+# 每次渲染都读文件 + 编码 → 预览一页要几百毫秒。
+#
+# 用 mtime 做 key —— 换了照片自动失效。
+_PHOTO_CACHE = {"key": None, "uri": None}
+
+
+def _current_photo():
+    """当前证件照（data URI）—— 没有就返回 None。
+
+    ## 照片在哪
+
+    `<plugin-data>/job-radar/photo/` 目录下的第一张图片
+    （设置页「证件照上传」放进去的）。
+
+    ## 为什么照片要跟着简历模板走
+
+    用户给的模板是**WPS 风格**：页眉右上角有个**圆形照片位**。
+    模板转换出来的 CSS 还原了配色，但**照片位是骨架的一部分** ——
+    不加的话，生成的简历永远没有照片。
+    """
+    try:
+        from . import storage as _storage
+        base = _storage.plugin_data_dir("job-radar")
+    except ImportError:
+        try:
+            import storage as _storage
+            base = _storage.plugin_data_dir("job-radar")
+        except Exception:
+            base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "hermes",
+                                "plugin-data", "job-radar")
+    d = os.path.join(base, "photo")
+    if not os.path.isdir(d):
+        return None
+
+    for name in sorted(os.listdir(d)):
+        ext = os.path.splitext(name)[1].lower()
+        if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+            continue
+        path = os.path.join(d, name)
+        try:
+            mtime = os.path.getmtime(path)
+            key = (path, mtime)
+        except OSError:
+            continue
+        if _PHOTO_CACHE["key"] == key:
+            return _PHOTO_CACHE["uri"]
+        try:
+            with open(path, "rb") as fh:
+                raw = fh.read()
+        except OSError:
+            continue
+        import base64
+        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "png": "image/png", "webp": "image/webp"}.get(ext.lstrip("."),
+                                                              "image/png")
+        uri = "data:%s;base64,%s" % (mime,
+                                     base64.b64encode(raw).decode("ascii"))
+        _PHOTO_CACHE["key"] = key
+        _PHOTO_CACHE["uri"] = uri
+        return uri
+    return None
+
+
 def uploaded_bg_image(template_id):
     """上传模板的底图（图片模板才有）—— 返回 data URI 或 None。"""
     path = os.path.join(TEMPLATES_DIR, template_id + ".bg")
@@ -295,7 +384,7 @@ def uploaded_bg_image(template_id):
     return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
 
-def render_html(template_id, context, css_override=None):
+def render_html(template_id, context, css_override=None, photo=None):
     """渲染一份简历 HTML。
 
     template_id: 内置 id，或用户上传转换出来的模板 id
@@ -303,6 +392,7 @@ def render_html(template_id, context, css_override=None):
                   {title, kind, paragraphs|bullets|tags|entries}
                   bullets/entries 的项：{text, basis}
     css_override: **直接给 CSS**，跳过「找模板」这一步。
+    photo: 证件照的 data URI。None = 用设置页上传的那张；"" = 不要照片。
 
     ## 为什么需要 css_override
 
@@ -329,6 +419,13 @@ def render_html(template_id, context, css_override=None):
     ctx["style"] = css
     ctx.setdefault("show_basis", False)
     ctx.setdefault("bg_image", uploaded_bg_image(template_id))
+    # **证件照** —— 有就渲染圆形照片位，没有就不占位
+    #
+    # `photo=None` → 用设置页上传的那张（`_current_photo()`）
+    # `photo=""` → 强制不要照片（测试用）
+    if photo is None:
+        photo = _current_photo()
+    ctx["photo"] = photo
     return Template(_SKELETON).render(**ctx)
 
 

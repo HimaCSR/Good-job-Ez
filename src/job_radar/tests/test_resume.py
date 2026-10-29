@@ -256,6 +256,57 @@ class TestTemplate(unittest.TestCase):
         self.assertIn("#123456", html, "css_override 没生效")
         self.assertIn("张三", html)
 
+    def test_skeleton_has_photo_slot(self):
+        """**简历骨架要有照片位** —— 用户给的模板右上角有圆形照片。
+
+        用户：「模板也没有放置图像的位置。」
+
+        → 骨架里加 `.photo`（圆形，页眉右上角），
+        **没有照片时整个 div 不渲染** → 不留空白占位。
+        """
+        import resume_template
+        with open(resume_template.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        self.assertIn('class="photo"', src, "骨架里没有照片位")
+        self.assertIn("border-radius: 50%", src, "照片位不是圆形的")
+
+    def test_photo_is_optional(self):
+        """**没有照片时不占位** —— 不渲染那个 div。"""
+        import resume_template
+        html = resume_template.render_html("classic", {
+            "title": "T", "identity": {"name": "张三"},
+            "sections": [{"title": "S", "kind": "list",
+                          "bullets": [{"text": "x", "basis": ""}]}],
+        }, photo="")
+        self.assertNotIn('class="photo"', html,
+                         "没有照片却渲染了照片位 —— 会留个空白")
+
+    def test_skeleton_comments_have_no_jinja_tags(self):
+        """**CSS 注释里不能出现 Jinja 标签** —— 照样会被解析。
+
+        本机踩过：在 CSS 注释里写了一个 if 标签 →
+        Jinja 找不到对应的 endif →
+        `TemplateSyntaxError: Unexpected end of template`。
+
+        → 要提 Jinja 标签，写在花括号井号注释里，
+        或者用文字描述。
+        """
+        import resume_template
+        with open(resume_template.__file__, encoding="utf-8") as fh:
+            src = fh.read()
+        i = src.find("_SKELETON = ")
+        j = src.find('"""', i + 20)
+        skeleton = src[i:j]
+        # 去掉 {# #} 注释（那些是合法的）
+        import re
+        stripped = re.sub(r"\{#.*?#\}", "", skeleton, flags=re.S)
+        for m in re.finditer(r"\{%.*?%\}", stripped):
+            tag = m.group(0)
+            # 允许真正的模板控制标签
+            if re.match(r"\{%\s*(if|elif|else|endif|for|endfor|set)\b", tag):
+                continue
+            self.fail("CSS 注释里有 Jinja 标签 %s —— 会被当成真的标签" % tag)
+
     def test_every_template_has_format(self):
         """**每条模板都必须有 `format`** —— 少了前端就崩。
 

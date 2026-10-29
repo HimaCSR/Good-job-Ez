@@ -261,6 +261,222 @@ def _docx_to_css(params):
 
 # ── .pdf ────────────────────────────────────────────────────────────────────
 
+# ── PDF 图形层：CTM / 透明度 / 版面结构 ─────────────────────────────────────
+#
+# **为什么要有这一层**
+#
+# 用户：「现在有样式了，但与我提供的模板文件完全不同。」
+#
+# 只抽颜色是不够的 —— WPS 简历模板的骨架长这样：
+#
+#   ┌──────────────────────────────┐
+#   │  ▓▓▓▓ 深蓝页眉底 ▓▓▓▓       │  ← 页眉整块是背景色，文字是白的
+#   │  ▓ 姓名   联系方式    (照片) ▓│
+#   │  ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓ │
+#   │  ▪ 个人简介                  │  ← 章节 = 淡色底条 + 左侧实心方块
+#   │  ▪ 经历……                   │
+#   └──────────────────────────────┘
+#
+# 这些「色块在哪、有多大、什么颜色」全在**绘图指令**里，
+# 不解析就只剩颜色 → 排版完全对不上。
+
+def _mat_mul(m1, m2):
+    """两个 2D 仿射矩阵相乘（PDF 的 `cm` 是「后乘」）。"""
+    a1, b1, c1, d1, e1, f1 = m1
+    a2, b2, c2, d2, e2, f2 = m2
+    return (a1 * a2 + b1 * c2,
+            a1 * b2 + b1 * d2,
+            c1 * a2 + d1 * c2,
+            c1 * b2 + d1 * d2,
+            e1 * a2 + f1 * c2 + e2,
+            e1 * b2 + f1 * d2 + f2)
+
+
+def _mat_apply(m, x, y):
+    a, b, c, d, e, f = m
+    return (a * x + c * y + e, b * x + d * y + f)
+
+
+def _pdf_alpha_map(data):
+    """`/G<n>` → 填充透明度（ca）。
+
+    PDF 里颜色可以是**半透明**的 —— WPS 模板的章节底条就是
+    「强调色 + 10% 透明度」画出来的，屏幕上看着是淡紫，
+    但 PDF 里存的是「深蓝 + alpha 0.1」。
+
+    **不读 alpha 就直接用颜色** → 章节底条变成深蓝 → 白字蓝底，
+    跟原设计完全不是一回事（本机踩过）。
+
+    `ca` 是填充透明度，`CA` 是描边的 —— 这里只用 `ca`。
+    """
+    ca = {}
+    for m in re.finditer(rb"(\d+)\s+0\s+obj\s*<<[^<>]*?/ca\s+([\d.]+)", data):
+        ca[int(m.group(1))] = float(m.group(2))
+    out = {}
+    for m in re.finditer(rb"/G(\d+)\s+(\d+)\s+0\s+R", data):
+        out[int(m.group(1))] = ca.get(int(m.group(2)), 1.0)
+    return out
+
+
+def _pdf_objects(data):
+    """PDF 对象表：obj 号 → (字典字节, 流字节或 None)。
+
+    **为什么要解析对象** —— 页眉那块大色块常常画在
+    **Form XObject** 里（内容单独放一个对象，页面上用 `Do` 引用）。
+    不解析对象就看不到它。
+    """
+    objs = {}
+    for m in re.finditer(rb"(?<![0-9])(\d+)\s+0\s+obj", data):
+        num = int(m.group(1))
+        end = data.find(b"endobj", m.end())
+        if end < 0:
+            continue
+        body = data[m.end():end]
+        sm = re.search(rb"stream\r?\n", body)
+        if sm:
+            dict_bytes = body[:sm.start()]
+            se = body.find(b"endstream", sm.end())
+            stream = body[sm.end():se] if se > 0 else b""
+        else:
+            dict_bytes = body
+            stream = None
+        objs[num] = (dict_bytes, stream)
+    return objs
+
+
+def _stream_text(dict_bytes, stream):
+    """对象里的流 → 文本（能解压就解压；是明文就直接读）。"""
+    if not stream:
+        return ""
+    if b"/FlateDecode" in dict_bytes:
+        import zlib
+        try:
+            return zlib.decompress(stream).decode("latin-1", errors="replace")
+        except Exception:
+            return ""
+    # 明文流 —— 一半以上是可打印字符才算
+    try:
+        txt = stream.decode("latin-1")
+    except Exception:
+        return ""
+    printable = sum(1 for ch in txt[:400] if ch.isprintable() or ch in "\r\n\t")
+    if txt and printable / float(len(txt[:400])) > 0.85:
+        return txt
+    return ""
+
+
+def _pdf_forms(data, objs):
+    """Form XObject：资源名 → 内容文本。
+
+    **只认 `/Subtype /Form`** —— 图片（`/Subtype /Image`）不是版面。
+    """
+    forms = {}
+    for m in re.finditer(rb"/(\w+)\s+(\d+)\s+0\s+R", data):
+        name = m.group(1).decode("latin-1")
+        num = int(m.group(2))
+        if name in forms or num not in objs:
+            continue
+        d, s = objs[num]
+        if b"/Form" not in d or s is None:
+            continue
+        txt = _stream_text(d, s)
+        if txt:
+            forms[name] = txt
+    return forms
+
+
+# 内容流里的绘图操作（顺序扫一遍）
+_OP_RE = re.compile(
+    r"(?P<q>\bq\b)"
+    r"|(?P<Q>\bQ\b)"
+    r"|(?P<cm>(?P<ma>[-\d.]+)\s+(?P<mb>[-\d.]+)\s+(?P<mc>[-\d.]+)\s+"
+    r"(?P<md>[-\d.]+)\s+(?P<me>[-\d.]+)\s+(?P<mf>[-\d.]+)\s+cm)"
+    r"|(?P<rg>(?P<cr>[-\d.]+)\s+(?P<cg>[-\d.]+)\s+(?P<cb2>[-\d.]+)\s+rg)"
+    r"|(?P<gs>/G(?P<gsn>\d+)\s+gs)"
+    r"|(?P<re>(?P<rx>[-\d.]+)\s+(?P<ry>[-\d.]+)\s+(?P<rw>[-\d.]+)\s+"
+    r"(?P<rh>[-\d.]+)\s+re)"
+    r"|(?P<do>/(?P<don>\w+)\s+Do)")
+
+
+def _pdf_rects(content, alphas, forms=None, ctm=None, depth=0):
+    """遍历内容流，返回**真正画出来**的矩形（PDF 用户坐标，y 向上）。
+
+    返回 [(x0, y0, x1, y1, (r,g,b), alpha)]。
+
+    ## 三个必须注意的点
+
+    **① 跟踪 CTM** —— `q`/`Q`/`cm` 决定当前变换。
+    不跟踪的话，套在 XObject 里的形状坐标是「对象空间」，
+    跟页面上的位置对不上 → 什么都分类不了。
+
+    **② 区分「填充」和「裁剪」** —— `re` 后面跟什么决定它画没画：
+    - `f` / `f*` → 真的画了（填充）
+    - `W` / `W*` → 裁剪路径（**没画**）
+    - `n` → 不画
+
+    把裁剪路径当色块 → 页眉底色 = 强调色 → 白字蓝底 → 字看不见。
+    本机踩过这个。
+
+    **③ `Do` 要递归进 Form** —— 页眉底块就在里面。
+    """
+    forms = forms or {}
+    cur = ctm or (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    stack = []
+    color = (0.0, 0.0, 0.0)
+    alpha = 1.0
+    out = []
+    for m in _OP_RE.finditer(content):
+        if m.group("q"):
+            stack.append(cur)
+        elif m.group("Q"):
+            if stack:
+                cur = stack.pop()
+        elif m.group("cm"):
+            cur = _mat_mul(
+                (float(m.group("ma")), float(m.group("mb")),
+                 float(m.group("mc")), float(m.group("md")),
+                 float(m.group("me")), float(m.group("mf"))), cur)
+        elif m.group("rg"):
+            color = (float(m.group("cr")), float(m.group("cg")),
+                     float(m.group("cb2")))
+        elif m.group("gs"):
+            alpha = alphas.get(int(m.group("gsn")), 1.0)
+        elif m.group("do"):
+            if depth < 3:
+                sub = forms.get(m.group("don"))
+                if sub:
+                    out.extend(_pdf_rects(sub, alphas, forms, cur, depth + 1))
+        else:  # re
+            tail = content[m.end():m.end() + 16]
+            if not re.match(r"\s*(f\*|f)\b", tail):
+                continue          # 裁剪路径 / 只结束路径 → 没画
+            x = float(m.group("rx"))
+            y = float(m.group("ry"))
+            w = float(m.group("rw"))
+            h = float(m.group("rh"))
+            p0 = _mat_apply(cur, x, y)
+            p1 = _mat_apply(cur, x + w, y + h)
+            out.append((min(p0[0], p1[0]), min(p0[1], p1[1]),
+                        max(p0[0], p1[0]), max(p0[1], p1[1]),
+                        color, alpha))
+    return out
+
+
+def _blend_white(rgb, alpha):
+    """半透明颜色叠在白底上的实际观感。
+
+    WPS 的章节底条 = 强调色 alpha 0.1 画在白底上 →
+    屏幕上看到的是**淡紫**，不是深蓝。
+    """
+    a = max(0.0, min(1.0, float(alpha)))
+    return tuple(a * c + (1.0 - a) * 1.0 for c in rgb)
+
+
+def _hex(rgb):
+    return "#%02x%02x%02x" % (int(max(0.0, min(1.0, rgb[0])) * 255),
+                               int(max(0.0, min(1.0, rgb[1])) * 255),
+                               int(max(0.0, min(1.0, rgb[2])) * 255))
+
 def _pdf_page_size(data):
     """从 PDF 抽页面尺寸（点，1pt = 1/72 英寸）。
 
@@ -603,6 +819,198 @@ def _pdf_geometry(content):
     return out
 
 
+def _pdf_layout(rects, page_w, page_h):
+    """把矩形分类成**版面结构**（页眉 / 竖带 / 章节条 / 图标块）。
+
+    ## 判据
+
+    | 结构 | 判据 |
+    | --- | --- |
+    | **页眉底块** | 宽 ≥ 内容宽 80%，**贴在页面顶部**，且不是白色 |
+    | **侧边竖带** | 高 ≥ 页面高 50%，宽很窄（≤ 内容宽 8%） |
+    | **章节底条** | 宽 ≥ 内容宽 40%，高在 10~120 之间，**不在页面顶部** |
+    | **图标方块** | 宽高接近（0.7~1.4），且 ≤ 60 |
+    | **分隔线** | 宽长、高 ≤ 4 |
+
+    ## 为什么按「位置 + 尺寸」而不是「颜色」
+
+    颜色会撞 —— 深蓝页眉和深蓝图标块颜色一样，
+    靠颜色分不开。位置和尺寸才是「角色」。
+
+    ## 白色要排除
+
+    每页都有一大块白底 —— 当成「页眉」就完了。
+    """
+    out = {}
+    if not rects:
+        return out
+    content_w = max((r[2] - r[0]) for r in rects) or 1.0
+    top = max(r[3] for r in rects)          # 页面顶（y 向上）
+
+    header = None
+    sidebars = []
+    bands = []
+    icons = []
+    lines = []
+
+    for (x0, y0, x1, y1, rgb, al) in rects:
+        w = x1 - x0
+        h = y1 - y0
+        eff = _blend_white(rgb, al)
+        white = all(c > 0.97 for c in eff)
+        # **分隔线** —— 又宽又扁
+        if w > content_w * 0.2 and h <= 4:
+            lines.append((w, h, eff, x0, y1))
+            continue
+        if white:
+            continue
+        # **侧边竖带** —— 贯穿大半页
+        if h >= page_h * 0.45 and w <= content_w * 0.08 and w > 2:
+            sidebars.append((w, h, eff, x0, y0, x1, y1))
+            continue
+        # **图标方块** —— 方方正正且小
+        if 8 <= w <= 60 and 0.7 <= w / max(h, 1e-6) <= 1.4 and h <= 60:
+            icons.append((w, h, eff, x0, y0))
+            continue
+        # **页眉底块** —— 顶部 + 宽
+        if y1 >= top - max(12.0, page_h * 0.02) and w >= content_w * 0.75:
+            if header is None or h > header[1]:
+                header = (w, h, eff, x0, y0, x1, y1)
+            continue
+        # **章节底条** —— 够宽、**不在页面顶部**、高度适中
+        #
+        # 「不在顶部」很关键 —— 稻壳儿模板顶部有条 #f1f1f1 浅灰横条，
+        # 那是**页眉的一部分**，不是章节底条。
+        # 不排除 → 章节标题被涂成浅灰底 → 跟原设计完全不是一回事。
+        if y1 >= top - max(12.0, page_h * 0.02):
+            continue
+        if w >= content_w * 0.35 and 8 <= h <= 140:
+            bands.append((w, h, eff, x0, y0))
+            continue
+        if w >= content_w * 0.35 and h > 140:
+            # 大块但不在顶部 —— 可能是侧栏卡片
+            bands.append((w, h, eff, x0, y0))
+
+    if header:
+        w, h, eff, x0, y0, x1, y1 = header
+        out["_header_bg"] = _hex(eff)
+        out["_header_h_ratio"] = round(h / max(page_h, 1e-6), 3)
+        out["_header_is_dark"] = 1 if sum(eff) / 3 < 0.62 else 0
+    if sidebars:
+        sidebars.sort(key=lambda v: -v[1])
+        w, h, eff, x0, y0, x1, y1 = sidebars[0]
+        out["_sidebar_color"] = _hex(eff)
+        out["_sidebar_w_ratio"] = round(w / max(content_w, 1e-6), 4)
+        # 竖带在左还是右 —— 相对内容区中心判断
+        out["_sidebar_side"] = "left" if x0 < content_w / 2 else "right"
+    if bands:
+        bands.sort(key=lambda b: (b[1], -b[0]))
+        # **章节底条** = 高度小、出现多次的那个
+        from collections import Counter
+        hs = Counter(round(b[1]) for b in bands)
+        common_h = hs.most_common(1)[0][0]
+        same = [b for b in bands if abs(b[1] - common_h) <= 2]
+        if same:
+            out["_band_color"] = _hex(same[0][2])
+            out["_band_h_ratio"] = round(common_h / max(page_h, 1e-6), 4)
+            out["_band_count"] = len(same)
+    if icons:
+        icons.sort(key=lambda v: -v[0] * v[1])
+        out["_icon_color"] = _hex(icons[0][2])
+        out["_icon_size"] = round(icons[0][0], 1)
+        out["_icon_count"] = len(icons)
+    if lines:
+        lines.sort(key=lambda l: -l[0])
+        out["_divider_px"] = max(1, round(lines[0][1]))
+        out["_divider_color"] = _hex(lines[0][2])
+    return out
+
+def _pdf_layout_css(lay, page_h_mm):
+    """版面结构 → CSS。
+
+    ## 生成的样式
+
+    | 结构 | CSS |
+    | --- | --- |
+    | 深色页眉底 | `.head` 整块铺强调色 + 文字反白 + 负外边距顶到纸边 |
+    | 侧边竖带 | `.page` 左边框 |
+    | 章节底条 | `.sec-title` 背景色 + 反白文字 |
+    | 图标方块 | `.sec-title::before` 一个小方块 |
+    | 分隔线 | `.sec-title` 下边框 |
+
+    ## 为什么要「反白」
+
+    深色底上的文字必须是浅色 —— 原设计就是「深蓝页眉 + 白字」。
+    直接套强调色 → 深蓝底深蓝字 → **字看不见**（本机踩过）。
+    """
+    lines = []
+
+    # ── 深色页眉底 ──
+    hb = lay.get("_header_bg")
+    if hb and lay.get("_header_is_dark"):
+        # 页眉高度占比 → 换成大致 mm
+        h_mm = max(28, round((lay.get("_header_h_ratio") or 0.13)
+                             * page_h_mm, 1))
+        lines.append(
+            "/* 页眉底色 —— 原设计是一整块深色 */\n"
+            ".head { background: %s; color: #ffffff; "
+            "margin: -%smm -%smm 6mm; padding: %smm %smm %smm %smm; }\n"
+            ".head .name { color: #ffffff; }\n"
+            ".head .sub, .head .contact { color: rgba(255,255,255,.85); }"
+            % (hb, _num(14), _num(16), _num(6), _num(6), _num(8), _num(8)))
+
+    # ── 侧边竖带 ──
+    sb = lay.get("_sidebar_color")
+    if sb:
+        w_ratio = lay.get("_sidebar_w_ratio") or 0.024
+        w_mm = max(1.5, round(w_ratio * 178, 1))
+        lines.append(
+            "/* 侧边竖带 */\n"
+            ".page { border-left: %smm solid %s; padding-left: 5mm; }"
+            % (_num(w_mm), sb))
+
+    # ── 章节底条 ──
+    bc = lay.get("_band_color")
+    if bc and (lay.get("_band_count") or 0) >= 2:
+        # **底色是深还是浅，文字颜色要跟着反** ——
+        # 淡紫底 (#eaebf2) + 白字 = **字看不见**。
+        # 深底（现场管理的 #384083）才用白字。
+        title_color = "#ffffff"
+        try:
+            r_, g_, b_ = (int(bc[i:i + 2], 16) / 255.0 for i in (1, 3, 5))
+            if (r_ + g_ + b_) / 3.0 > 0.62:
+                title_color = lay.get("_icon_color") or "#333333"
+        except (ValueError, IndexError):
+            pass
+        lines.append(
+            "/* 章节标题栏底色 */\n"
+            ".sec-title { background: %s; color: %s; "
+            "padding: 4px 8px; }" % (bc, title_color))
+
+    # ── 章节图标方块 ──
+    ic = lay.get("_icon_color")
+    if ic and (lay.get("_icon_count") or 0) >= 2:
+        sz = lay.get("_icon_size") or 24
+        # PDF 用户坐标 → mm（页面高 1740 ≈ 297mm → 约 0.17mm/单位）
+        size_mm = max(3.0, round(sz * (page_h_mm / 1740.0), 1))
+        lines.append(
+            "/* 章节标题前的实心方块 */\n"
+            ".sec-title { padding-left: %smm; position: relative; }\n"
+            ".sec-title::before { content: ''; position: absolute; "
+            "left: 0; top: 50%%; transform: translateY(-50%%); "
+            "width: %smm; height: %smm; background: %s; }"
+            % (_num(size_mm + 2), _num(size_mm), _num(size_mm), ic))
+
+    # ── 分隔线 ──
+    if lay.get("_divider_px") and not bc:
+        lines.append(
+            "/* 章节分隔线 */\n"
+            ".sec-title { border-bottom: %spx solid %s; padding-bottom: 3px; }"
+            % (_num(lay["_divider_px"]), lay.get("_divider_color") or "#cccccc"))
+    return lines
+
+
+
 def _pdf_to_css(data):
     """PDF → CSS（尽力而为，但**尽量把视觉风格抽出来**）。
 
@@ -663,6 +1071,49 @@ def _pdf_to_css(data):
         if css_fam:
             p["font_family"] = '"%s", %s' % (css_fam, p["font_family"])
 
+    # ── 版面结构 ──
+    #
+    # **配色对了但排版完全不像** —— 用户第二次反馈就是这个。
+    # 光抽颜色不够，得抽「哪块是页眉 / 哪条是竖带 / 章节条什么色」。
+    layout = {}
+    try:
+        alphas = _pdf_alpha_map(data)
+        objs = _pdf_objects(data)
+        forms = _pdf_forms(data, objs)
+        texts, _raws = _pdf_streams(data)
+        content = ""
+        for t in texts:
+            if re.search(r"/\S+\s+[\d.]+\s+Tf", t):
+                content = t
+                break
+        if not content:
+            for t in texts:
+                if " re" in t and ("Tj" in t or " Do" in t):
+                    content = t
+                    break
+        if content:
+            rects = _pdf_rects(content, alphas, forms)
+            if rects:
+                page_h = max(r[3] for r in rects) - min(r[1] for r in rects)
+                page_w = max(r[2] for r in rects) - min(r[0] for r in rects)
+                layout = _pdf_layout(rects, page_w, page_h)
+                for key in ("_header_bg", "_sidebar_color", "_band_color",
+                            "_icon_color"):
+                    if layout.get(key):
+                        p[key] = layout[key]
+                # **新版版面判定要覆盖旧的几何抽取** ——
+                # 旧的 `_pdf_geometry` 只按形状猜「标题栏底色」，
+                # 会把**页眉顶部的浅灰横条**当成章节底条
+                # （稻壳儿模板就踩过 → 章节标题被涂成浅灰底）。
+                # 新版会排除「贴顶」的块 → 没找到章节条就清掉。
+                if "band" not in layout and "_band_color" in p:
+                    p.pop("_band_color", None)
+                    p["_extracted"] = [x for x in p["_extracted"]
+                                       if x != "标题栏底色"]
+    except Exception:
+        # 版面解析失败**不能影响配色抽取** —— 宁可少还原一点
+        layout = {}
+
     text, note = _pdf_text(data)
     if not text.strip():
         p["_note"] = note or ("这个 PDF 里没抽出文字（可能是扫描件）。"
@@ -718,6 +1169,28 @@ def _pdf_to_css(data):
         lines.append(
             ".sec-title { background: %s; color: %s; padding: 3px 6px; }"
             % (band, title_color))
+
+    # ── 版面结构 CSS ──
+    if layout:
+        try:
+            lines.extend(_pdf_layout_css(layout, p["page_height_mm"]))
+            labels = []
+            # **只有真的生成了 CSS 才报这个特征** ——
+            # 浅色页眉块（比如稻壳儿的 #f1f1f1 横条）不会变成
+            # `.head { background }` → 报了就是虚报。
+            if layout.get("_header_bg") and layout.get("_header_is_dark"):
+                labels.append("页眉")
+            if layout.get("_sidebar_color"):
+                labels.append("侧边竖带")
+            if layout.get("_band_color") and (layout.get("_band_count") or 0) >= 2:
+                labels.append("章节底条")
+            if layout.get("_icon_color") and (layout.get("_icon_count") or 0) >= 2:
+                labels.append("章节图标")
+            for lb in labels:
+                if lb not in p["_extracted"]:
+                    p["_extracted"].append(lb)
+        except Exception:
+            pass
 
     return "\n".join(lines) + "\n", p
 
