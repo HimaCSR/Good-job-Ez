@@ -25,8 +25,10 @@ except ImportError:          # 脱离包单独导入时（单测）
 
 try:
     from . import city_codes
+    from . import boss_city_codes
 except ImportError:          # 脱离包单独导入时（单测）
     import city_codes
+    import boss_city_codes
 
 log = get_logger()
 
@@ -38,11 +40,31 @@ FIELD_MAP = {
         "tags": "tags", "url": "url", "job_id": "job_id",
         "description": "description",
     },
+    # BOSS 的 adapter（社区版 / 本地版）字段名**不完全一样**：
+    #   - 原始 API 名：name / brandName / salaryDesc / cityName / jobId
+    #   - 统一词表名：title / company / salary / area / job_id
+    # 两套都列上 —— **不管 adapter 返哪套都能正确归一**。
+    #
+    # 社区版只返统一名，本地版两套都返 —— 这里两套都认，最稳。
+    # **顺序有意义** —— `_normalize` 按插入顺序取，**后面的覆盖前面的**。
+    # 所以**统一词表名放后面**（优先），原始 API 名放前面（兜底）。
+    #
+    # 本地 adapter 两套都返；社区 adapter 只返统一名。
+    # 不管返哪套，最后落到同一个统一字段上。
     "boss": {
-        "name": "title", "brandName": "company", "salaryDesc": "salary",
-        "cityName": "area", "jobExperience": "experience",
-        "jobDegree": "degree", "skills": "tags", "url": "url",
-        "jobId": "job_id", "description": "description",
+        # ── 原始 API 名（兜底）──
+        "name": "title", "brandName": "company",
+        "salaryDesc": "salary",
+        # **cityName 只给「城市」** —— BOSS 的 area 是「城市·区县·商圈」，
+        # 直接把 cityName 映射成 area 会**把区县信息冲掉**。
+        "cityName": "city",
+        "jobExperience": "experience", "jobDegree": "degree",
+        "skills": "tags", "jobId": "job_id",
+        # ── 统一词表名（优先，覆盖上面的）──
+        "title": "title", "company": "company", "salary": "salary",
+        "area": "area", "experience": "experience", "degree": "degree",
+        "tags": "tags", "url": "url", "job_id": "job_id",
+        "description": "description",
     },
 }
 
@@ -92,14 +114,27 @@ def _fetch_site(site, keyword, cfg, city_code=None):
         log.info("抓取完成 site=zhaopin kw=%s jobs=%d", keyword, len(jobs))
         return jobs, None
     if site == "boss":
+        # **BOSS 必须先有页面上下文** ——
+        # 它的 joblist API 要靠页面里的 anti-content token，
+        # 没有 zhipin 页面就 `Daemon request timed out`（实测过）。
+        #
+        # `city` 这里传的是 **BOSS 的 9 位城市码**（101040100=重庆），
+        # **不是智联的 jl 码**（551）—— 两个码表完全不是一个体系。
+        boss_city = city_code or cfg.get("boss_city") or "101040100"
+        ready = bbclient.ensure_boss_context(city_code=boss_city)
+        if not ready.get("ok"):
+            log.warning("BOSS 页面没打开 site=boss err=%s", ready.get("detail"))
+            return [], "BOSS 页面没打开：%s" % ready.get("detail")
+
         data = bbclient.run_site("boss/search", keyword,
-                                 "--city", str(cfg["boss_city"]))
+                                 "--city", str(boss_city))
         if "error" in data:
             log.warning("抓取失败 site=boss kw=%s err=%s",
                         keyword, str(data["error"])[:150])
             return [], data["error"]
         jobs = data.get("jobs") or []
-        log.info("抓取完成 site=boss kw=%s jobs=%d", keyword, len(jobs))
+        log.info("抓取完成 site=boss kw=%s city=%s jobs=%d",
+                 keyword, boss_city, len(jobs))
         return jobs, None
     log.error("未知站点: %s", site)
     return [], "未知站点: %s" % site
@@ -173,8 +208,25 @@ def scan(args, **kwargs):
         if not city_codes_list:
             city_codes_list = [str(cfg.get("city") or "").strip() or "489"]
 
+        # **每个站用自己那套城市码** ——
+        # 智联是 3~4 位 jl 码（重庆=551），BOSS 是 9 位 city 码（重庆=101040100）。
+        # **混用会静默抓到别的城市** —— 所以这里分开翻译。
+        try:
+            boss_city_codes_list = boss_city_codes.cities_to_codes(
+                cfg.get("cities") or [])
+        except Exception:
+            boss_city_codes_list = []
+        if not boss_city_codes_list:
+            boss_city_codes_list = [str(cfg.get("boss_city") or "").strip()
+                                    or "101040100"]
+
         for site in sites:
-            for city_code in city_codes_list:
+            # 选这个站该用的码表
+            if site == "boss":
+                site_city_codes = boss_city_codes_list
+            else:
+                site_city_codes = city_codes_list
+            for city_code in site_city_codes:
                 for kw in keywords:
                     if seen >= limit:
                         break

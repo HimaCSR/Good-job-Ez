@@ -57,6 +57,19 @@ def _cmd(*parts):
     return [_find_bash(), BB_SH, *parts]
 
 
+def _run_bb(*args, timeout=120):
+    """跑一条 bb-browser 命令。返回 (returncode, stdout, stderr)。"""
+    cmd = _cmd(*args)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           encoding="utf-8", errors="replace")
+        return p.returncode, (p.stdout or ""), (p.stderr or "")
+    except subprocess.TimeoutExpired:
+        return -1, "", "bb-browser 超时(%ss)" % timeout
+    except OSError as exc:
+        return -1, "", str(exc)
+
+
 def run_site(site, *args, timeout=120):
     """跑一个 adapter，返回解析后的 JSON。失败返回 {"error": ...}。
 
@@ -114,6 +127,88 @@ def run_site(site, *args, timeout=120):
     log.info("adapter 成功 site=%s elapsed=%.1fs jobs=%d bytes=%d",
              site, elapsed, count, len(out))
     return data if isinstance(data, dict) else {"items": data}
+
+
+# BOSS 的搜索页 —— adapter 必须在**这个页面的上下文里**跑
+# （BOSS 的 joblist API 要靠页面里的 anti-content token 才不被风控）
+BOSS_SEARCH_URL = "https://www.zhipin.com/web/geek/jobs"
+
+
+def ensure_boss_context(city_code="101040100", timeout=120):
+    """确保浏览器里有一个 BOSS 搜索页，并且已加载完。
+
+    返回 {'ok': bool, 'tab': str, 'detail': str}
+
+    ## 为什么需要这一步
+
+    BOSS 的 `joblist.json` API **必须在 zhipin 页面上下文里**发出去 ——
+    它要靠页面里的 anti-content token。社区版 adapter 直接 fetch 会
+    `Daemon request timed out`。
+
+    实测（2026-10-29）：
+    - 没有 BOSS 页面 → `site boss/search` **超时**
+    - 先 `open` 一个 BOSS 搜索页 → **同一个命令立刻正常**，返回 300 个岗位
+
+    所以流程是：**先 open 一次，之后 site 命令会复用那个 tab**。
+
+    ## 为什么不用 `site` 命令自己开 tab
+
+    `bb-browser site` 没有 `--tab` 选项，它自己开的 tab **不是 zhipin 域名** →
+    拿不到 token → 超时。所以必须我们自己 open。
+
+    ## 幂等
+
+    已经有 zhipin tab 就直接复用，不重复开（避免开一堆 tab）。
+    """
+    ready = browser_session.ensure_browser()
+    if not ready.get("ok"):
+        return {"ok": False, "detail": ready.get("detail")}
+
+    # ① 先看有没有现成的 zhipin tab
+    tabs = _run_bb_json("tab", "list")
+
+    existing = ""
+    for t in (tabs.get("tabs") or []):
+        url = t.get("url") or ""
+        if "zhipin.com" in url:
+            existing = t.get("tab") or ""
+            break
+    if existing:
+        log.info("复用已有 BOSS tab=%s", existing)
+        return {"ok": True, "tab": existing, "detail": "复用已有 BOSS 页面"}
+
+    # ② 没有就 open 一个
+    url = "%s?city=%s" % (BOSS_SEARCH_URL, city_code)
+    code, out, err = _run_bb("open", url, timeout=timeout)
+    text = (out or "").strip()
+    if code != 0:
+        return {"ok": False,
+                "detail": (err or text or "打开 BOSS 页面失败").strip()[:200]}
+    tab = ""
+    for line in text.splitlines():
+        if line.lower().startswith("tab:"):
+            tab = line.split(":", 1)[1].strip()
+            break
+
+    # ③ 等页面加载完 —— 太快就 open 的话，adapter 跑的时候页面还没 ready
+    time.sleep(4)
+    log.info("已打开 BOSS 页面 tab=%s url=%s", tab, url)
+    return {"ok": True, "tab": tab, "detail": "已打开 BOSS 页面"}
+
+
+def _run_bb_json(*args, timeout=60):
+    """跑 bb-browser 并解析 JSON 输出（失败返回 {}）。"""
+    code, out, err = _run_bb(*args, timeout=timeout)
+    text = (out or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if isinstance(data, dict) and "result" in data:
+        data = data["result"]
+    return data if isinstance(data, dict) else {}
 
 
 def polite_pause(base=BASE_GAP):
