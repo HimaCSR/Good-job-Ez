@@ -2379,6 +2379,11 @@ function ResumeView({ ctx, cfg }) {
   const uploadDirRef = React.useRef(null)
   const [converting, setConverting] = React.useState(false)
   const [convertMsg, setConvertMsg] = React.useState('')
+  // **预览哪个模板** —— 用户反馈「无法预览所转换模板的样子」
+  const [previewTpl, setPreviewTpl] = React.useState(null)
+  // **待确认的转换结果** —— 先转换+预览，用户点「加入模板库」才落盘
+  const [pendingItems, setPendingItems] = React.useState([])
+  const [committing, setCommitting] = React.useState(false)
 
   // 单个文件 → base64
   //
@@ -2395,13 +2400,19 @@ function ResumeView({ ctx, cfg }) {
     fr.readAsDataURL(file)
   })
 
-  // 转换一个文件，返回 {ok, name, error, extracted}
+  // **先转换 + 预览，不落盘** —— 用户确认后才真正加入模板库。
+  //
+  // 用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+  //
+  // **dry_run** —— 后端只转换、返回 CSS 片段和渲染好的 HTML，
+  // **不写磁盘**。用户点「加入模板库」才真落盘。
+  // → 用户点「取消」不会留下一堆垃圾模板。
   const convertOne = async (file) => {
     try {
       const data_base64 = await readBase64(file)
       const r = await ctx.rest('/templates/convert', {
         method: 'POST',
-        body: { filename: file.name, data_base64 },
+        body: { filename: file.name, data_base64, dry_run: true },
       })
       if (!r || r.ok === false) {
         return { ok: false, name: file.name, error: (r && r.error) || '转换失败' }
@@ -2409,11 +2420,35 @@ function ResumeView({ ctx, cfg }) {
       return {
         ok: true,
         name: (r.template && r.template.name) || file.name,
+        filename: file.name,
+        data_base64,
         extracted: r.extracted || [],
         note: r.note || '',
+        html: r.html_preview || '',
+        template_id: (r.template && r.template.template_id) || '',
       }
     } catch (err) {
       return { ok: false, name: file.name, error: String((err && err.message) || err) }
+    }
+  }
+
+  // **真的加入模板库** —— 把 dry_run 转成正式落盘
+  const commitOne = async (item) => {
+    try {
+      const r = await ctx.rest('/templates/convert', {
+        method: 'POST',
+        body: {
+          filename: item.filename,
+          data_base64: item.data_base64,
+          name: item.name,
+        },
+      })
+      if (!r || r.ok === false) {
+        return { ok: false, name: item.name, error: (r && r.error) || '加入失败' }
+      }
+      return { ok: true, name: item.name }
+    } catch (err) {
+      return { ok: false, name: item.name, error: String((err && err.message) || err) }
     }
   }
 
@@ -2439,25 +2474,50 @@ function ResumeView({ ctx, cfg }) {
 
     const okList = results.filter((r) => r.ok)
     const badList = results.filter((r) => !r.ok)
+
+    // **成功的先摆着，等用户确认** ——
+    // 「转换并加入模板库」是这个流程的名字：
+    // **转换 → 预览 → 确认加入**。
+    // 之前是「选完文件直接落盘」—— 用户既看不到预览，也没法取消。
+    if (okList.length) {
+      setPendingItems(okList)
+    }
+
     const parts = []
     if (okList.length) {
-      parts.push('已加入模板库 ' + okList.length + ' 个：'
-        + okList.map((r) => r.name).join('、'))
+      parts.push('已转换 ' + okList.length + ' 个，**预览确认后**加入模板库')
       const ex = okList[0].extracted
       if (ex && ex.length) parts.push('（识别到：' + ex.join('、') + '）')
-      const note = okList.find((r) => r.note && r.note)
-      if (note) parts.push(note.note)
     }
     if (badList.length) {
       parts.push('失败 ' + badList.length + ' 个：'
         + badList.map((r) => r.name + '（' + (r.error || '未知错误') + '）').join('；'))
     }
     setConvertMsg(parts.join('  ') || '没有可转换的文件')
+    setConverting(false)
+  }
 
-    if (okList.length) {
+  // **确认加入模板库** —— 把待确认的逐个真落盘
+  const commitPending = async () => {
+    if (!pendingItems.length) return
+    setCommitting(true)
+    setConvertMsg('正在加入模板库 …')
+    const done = []
+    const failed = []
+    for (const item of pendingItems) {
+      const r = await commitOne(item)
+      if (r.ok) done.push(r.name)
+      else failed.push(r.name + '（' + r.error + '）')
+    }
+    setPendingItems([])
+    setCommitting(false)
+    const parts = []
+    if (done.length) parts.push('已加入模板库 ' + done.length + ' 个：' + done.join('、'))
+    if (failed.length) parts.push('失败：' + failed.join('；'))
+    setConvertMsg(parts.join('  ') || '没有加入任何模板')
+    if (done.length) {
       qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
     }
-    setConverting(false)
   }
 
   // 删掉一个上传的模板（内置模板不给删）
@@ -2517,7 +2577,7 @@ function ResumeView({ ctx, cfg }) {
             jsx('b', { children: 'PDF' }),
             jsx('span', { children: ' 或 ' }),
             jsx('b', { children: '图片（.png / .jpg）' }),
-            jsx('span', { children: '，再点「转换并加入模板库」。' }),
+            jsx('span', { children: '，会自动转换并弹出预览 —— 看着对了再点「加入模板库」。' }),
             jsx('br', {}),
             jsx('span', { children: '转换在本机完成，文件不会离开这台电脑。Word 走版式参数抽取，PDF 和图片按视觉还原成「底图 + 文字层」。' }),
           ]}),
@@ -2528,6 +2588,8 @@ function ResumeView({ ctx, cfg }) {
             tpl,
             active: picked.includes(tpl.template_id),
             onToggle: () => toggle(tpl.template_id),
+            // **预览** —— 看看这个模板渲染成什么样
+            onPreview: () => setPreviewTpl(tpl),
             // 只有上传的模板能删
             onDelete: (tpl.builtin || tpl.format === 'builtin')
               ? null
@@ -2650,11 +2712,206 @@ function ResumeView({ ctx, cfg }) {
             description: '在「岗位推荐」里对某个岗位做「简历匹配优化」并投递成功后，简历会自动存到这里。',
           }),
     }),
+
+    // ── 模板预览 ──
+    previewTpl ? jsx(TemplatePreviewDialog, {
+      tpl: previewTpl,
+      ctx,
+      onClose: () => setPreviewTpl(null),
+    }) : null,
+
+    // ── 转换结果待确认 ──
+    pendingItems.length ? jsx(ConvertConfirmDialog, {
+      items: pendingItems,
+      committing,
+      onCommit: commitPending,
+      onClose: () => setPendingItems([]),
+    }) : null,
   ]})
 }
 
+/** 转换结果确认弹窗 —— 「转换并加入模板库」的下一步。
+ *
+ * 用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+ *
+ * 流程改成：**选文件 → 转换（不落盘）→ 预览 → 点「加入模板库」才落盘**。
+ * → 用户能看清版式对不对，也能取消（不留垃圾模板）。
+ *
+ * 多个文件时用标签页切换。
+ */
+function ConvertConfirmDialog({ items, committing, onCommit, onClose }) {
+  const [idx, setIdx] = React.useState(0)
+  const cur = items[Math.min(idx, items.length - 1)] || {}
+  return jsx('div', {
+    className: cn(
+      'fixed inset-0 z-50 flex items-center justify-center',
+      'bg-black/55 p-6'
+    ),
+    onClick: onClose,
+    children: jsxs('div', {
+      className: cn(
+        'flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden',
+        'rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor)'
+      ),
+      onClick: (e) => e.stopPropagation(),
+      children: [
+        jsxs('div', {
+          className: 'flex items-center justify-between border-b border-(--ui-stroke-tertiary) px-4 py-3',
+          children: [
+            jsxs('div', { children: [
+              jsx('div', { className: 'text-sm font-medium', children: '转换结果预览' }),
+              jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: cur.name || '' }),
+            ]}),
+            jsx('button', {
+              type: 'button',
+              onClick: onClose,
+              className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+              children: '取消',
+            }),
+          ],
+        }),
+        jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
+          // 多个文件时切换
+          items.length > 1
+            ? jsxs('div', { className: 'flex flex-wrap gap-1.5', children:
+                items.map((it, i) => jsx('button', {
+                  key: it.template_id || i,
+                  type: 'button',
+                  onClick: () => setIdx(i),
+                  className: cn(
+                    'rounded-full border px-2.5 py-0.5 text-xs',
+                    i === idx
+                      ? 'border-(--ui-accent) text-(--ui-text-primary)'
+                      : 'border-(--ui-stroke-tertiary) text-(--ui-text-tertiary) hover:text-(--ui-text-primary)'),
+                  children: it.name,
+                })) })
+            : null,
+          // 识别到了什么
+          (cur.extracted && cur.extracted.length)
+            ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: '识别到：' + cur.extracted.join('、') })
+            : null,
+          cur.note
+            ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: cur.note })
+            : null,
+          // **预览本体**
+          jsx('div', {
+            className: cn(
+              'overflow-auto rounded-md border border-(--ui-stroke-tertiary)',
+              'bg-white p-6'
+            ),
+            dangerouslySetInnerHTML: { __html: cur.html || '' },
+          }),
+          jsxs('div', { className: 'flex justify-end gap-2', children: [
+            jsx('button', {
+              type: 'button',
+              onClick: onClose,
+              className: 'rounded-md border border-(--ui-stroke-tertiary) px-3 py-1.5 text-xs text-(--ui-text-secondary) hover:bg-(--ui-bg-elevated)',
+              children: '取消',
+            }),
+            jsx('button', {
+              type: 'button',
+              disabled: committing,
+              onClick: onCommit,
+              className: cn(
+                'rounded-md border border-(--ui-accent) px-3 py-1.5 text-xs',
+                'text-(--ui-text-primary) disabled:opacity-50'),
+              children: committing
+                ? '加入中…'
+                : ('加入模板库' + (items.length > 1 ? '（' + items.length + ' 个）' : '')),
+            }),
+          ]}),
+        ]}),
+      ],
+    }),
+  })
+}
+
+/** 模板预览弹窗 —— 看看这个模板渲染成什么样。
+ *
+ * 用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+ *
+ * 上传的模板转换完只登记一条记录（名字 + CSS 片段），
+ * **看不到渲染成什么样** → 不知道版式对不对、能不能用。
+ *
+ * 内容全部来自**用户自己的画像和经历** —— 不编造。
+ * 渲染方式跟「简历匹配优化」弹窗一致（dangerouslySetInnerHTML + 白底）。
+ */
+function TemplatePreviewDialog({ tpl, ctx, onClose }) {
+  const [state, setState] = React.useState({ phase: 'loading' })
+
+  React.useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await ctx.rest('/templates/preview', {
+          method: 'POST',
+          body: { template_id: tpl.template_id },
+        })
+        if (!alive) return
+        if (!r || r.ok === false) {
+          setState({ phase: 'error', error: (r && r.error) || '预览失败' })
+          return
+        }
+        setState({ phase: 'done', html: r.html })
+      } catch (e) {
+        if (alive) setState({ phase: 'error', error: String((e && e.message) || e) })
+      }
+    })()
+    return () => { alive = false }
+  }, [tpl.template_id, ctx])
+
+  return jsx('div', {
+    className: cn(
+      'fixed inset-0 z-50 flex items-center justify-center',
+      'bg-black/55 p-6'
+    ),
+    onClick: onClose,
+    children: jsxs('div', {
+      className: cn(
+        'flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden',
+        'rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor)'
+      ),
+      onClick: (e) => e.stopPropagation(),
+      children: [
+        jsxs('div', {
+          className: 'flex items-center justify-between border-b border-(--ui-stroke-tertiary) px-4 py-3',
+          children: [
+            jsxs('div', { children: [
+              jsx('div', { className: 'text-sm font-medium', children: '模板预览' }),
+              jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.name || '' }),
+            ]}),
+            jsx('button', {
+              type: 'button',
+              onClick: onClose,
+              className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+              children: '关闭',
+            }),
+          ],
+        }),
+        jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
+          state.phase === 'loading'
+            ? jsx('div', { className: 'py-8 text-center text-xs text-(--ui-text-tertiary)', children: '正在渲染…' })
+            : null,
+          state.phase === 'error'
+            ? jsx('div', { className: 'rounded-md border border-(--ui-stroke-tertiary) p-3 text-xs text-(--ui-text-secondary)', children: state.error })
+            : null,
+          state.phase === 'done'
+            ? jsx('div', {
+                className: cn(
+                  'overflow-auto rounded-md border border-(--ui-stroke-tertiary)',
+                  'bg-white p-6'
+                ),
+                dangerouslySetInnerHTML: { __html: state.html || '' },
+              })
+            : null,
+        ]}),
+      ],
+    }),
+  })
+}
+
 /** 模板卡 —— 内置模板画一个迷你预览缩略图，上传模板用文件名。 */
-function TemplateCard({ tpl, active, onToggle, onDelete }) {
+function TemplateCard({ tpl, active, onToggle, onDelete, onPreview }) {
   const builtin = tpl.builtin || tpl.format === 'builtin'
   // **外层是 div 不是 button** —— 上传的模板要在角上放「删除」按钮，
   // button 里套 button 是非法 HTML，浏览器会拆掉结构导致点击错位。
@@ -2710,6 +2967,18 @@ function TemplateCard({ tpl, active, onToggle, onDelete }) {
           jsx('div', { className: 'mt-1 text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.description || '' }),
         ],
       }),
+      // **预览按钮** —— 看看这个模板渲染成什么样
+      //
+      // 用户反馈：「无法预览所转换模板的样子」——
+      // 上传的模板转换完只有一条记录（名字 + CSS），
+      // **看不到渲染成什么样**，不知道版式对不对、能不能用。
+      onPreview ? jsx('button', {
+        type: 'button',
+        onClick: onPreview,
+        title: '预览这个模板',
+        className: 'absolute bottom-2 left-2 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-text-primary)',
+        children: '预览',
+      }) : null,
       // 删除按钮 —— 只有上传的模板能删，内置模板没有
       onDelete ? jsx('button', {
         type: 'button',

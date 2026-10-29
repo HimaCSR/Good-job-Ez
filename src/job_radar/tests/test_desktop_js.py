@@ -250,6 +250,7 @@ class TestNoUndefinedIdentifiers(unittest.TestCase):
         "TITLEBAR_AREAS", "STATUSBAR_AREAS",
         # 本文件的 helper（在别的函数里定义）
         "Segmented", "Panel", "Field", "ChipEditor", "TemplateCard",
+        "TemplatePreviewDialog", "ConvertConfirmDialog",
         "ResumeRow", "JobCard", "ApplyResumeDialog", "ResumeOptimizeDialog",
         "ExperienceEditor", "ExperienceForm", "PhotoUpload", "LoginPanel",
         "ApplySwitchPanel", "PushSettingsPanel",
@@ -840,3 +841,74 @@ class TestCityPicker(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestTemplatePreview(unittest.TestCase):
+    """模板预览 —— 用户反馈「无法预览所转换模板的样子」。
+
+    ## 为什么要有
+
+    用户原话：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+
+    原来的流程是「选完文件直接落盘」——
+    **既看不到预览，也没法取消**（转换得不好也留下了）。
+
+    → 改成三步：**转换（不落盘）→ 预览 → 确认加入**。
+
+    ## 三处都要有
+
+    1. **上传走 dry_run** —— 不落盘，用户点取消不留垃圾模板
+    2. **预览弹窗** —— 显示渲染好的 HTML
+    3. **模板卡上的「预览」按钮** —— 已入库的模板也能随时看
+    """
+
+    def setUp(self):
+        self.src = _read()
+        self.funcs = dict(_functions(self.src))
+
+    def test_upload_uses_dry_run(self):
+        """**上传先 dry_run** —— 不落盘，等用户确认。"""
+        body = self.funcs.get("ResumeView", "")
+        self.assertIn("dry_run: true", body,
+                      "上传没有走 dry_run —— 转换完直接落盘，用户没法预览")
+
+    def test_has_commit_function(self):
+        """**确认加入的函数** —— dry_run 之后要真落盘。"""
+        body = self.funcs.get("ResumeView", "")
+        self.assertIn("commitOne", body, "没有 commitOne —— 没法真正加入模板库")
+        self.assertIn("commitPending", body, "没有 commitPending")
+
+    def test_confirm_dialog_exists(self):
+        """**转换结果确认弹窗** —— 显示预览 + 「加入模板库」按钮。"""
+        self.assertIn("ConvertConfirmDialog", self.funcs,
+                      "找不到 ConvertConfirmDialog 组件")
+        body = self.funcs.get("ConvertConfirmDialog", "")
+        self.assertIn("加入模板库", body, "确认弹窗没有「加入模板库」按钮")
+        self.assertIn("dangerouslySetInnerHTML", body,
+                      "确认弹窗没有显示 HTML 预览")
+
+    def test_preview_dialog_exists(self):
+        """**模板预览弹窗** —— 已入库模板也能随时预览。"""
+        self.assertIn("TemplatePreviewDialog", self.funcs,
+                      "找不到 TemplatePreviewDialog 组件")
+        body = self.funcs.get("TemplatePreviewDialog", "")
+        self.assertIn("/templates/preview", body,
+                      "预览弹窗没有调 /templates/preview")
+
+    def test_template_card_has_preview_button(self):
+        """**模板卡上有「预览」按钮**。"""
+        body = self.funcs.get("TemplateCard", "")
+        self.assertIn("onPreview", body, "TemplateCard 没有 onPreview")
+        self.assertIn("预览", body, "TemplateCard 没有「预览」按钮")
+
+    def test_preview_uses_dangerously_set_inner_html(self):
+        """**预览用 dangerouslySetInnerHTML** —— 显示完整 HTML。"""
+        body = self.funcs.get("TemplatePreviewDialog", "")
+        self.assertIn("dangerouslySetInnerHTML", body,
+                      "预览弹窗没有用 dangerouslySetInnerHTML")
+
+    def test_convert_msg_mentions_confirm_step(self):
+        """**提示语要说清楚要确认** —— 不然用户以为已经加进去了。"""
+        body = self.funcs.get("ResumeView", "")
+        self.assertIn("预览确认后", body,
+                      "转换提示没说要预览确认")

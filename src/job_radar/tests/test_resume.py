@@ -225,6 +225,37 @@ class TestTemplate(unittest.TestCase):
         finally:
             bbclient.run_site = orig
 
+    def test_templates_dir_is_outside_plugin_dir(self):
+        """**上传的模板不能落进插件目录** —— 会污染 git 仓库。
+
+        插件目录在开发模式下是 **junction 指向仓库** →
+        用户上传的模板会变成仓库里的未跟踪文件。
+
+        → 模板目录应该在 `<plugin-data>/job-radar/templates`。
+        """
+        import resume_template
+        plugin_dir = os.path.dirname(os.path.abspath(resume_template.__file__))
+        tdir = os.path.abspath(resume_template.TEMPLATES_DIR)
+        self.assertNotIn(os.path.abspath(plugin_dir), tdir,
+                         "模板目录在插件目录里 —— 会落进 git 仓库：%s" % tdir)
+        self.assertIn("plugin-data", tdir.replace("\\", "/"),
+                      "模板目录应该在 plugin-data 下：%s" % tdir)
+
+    def test_render_html_accepts_css_override(self):
+        """**dry_run 预览要能直接传 CSS** —— 转换出的 CSS 还没落盘。
+
+        「先预览再加入」流程里，用户点「取消」就不该留下模板 ——
+        所以 dry_run 不落盘，但预览要渲染出真实版式。
+        """
+        from resume_template import render_html
+        html = render_html("classic", {
+            "title": "T", "identity": {"name": "张三"},
+            "sections": [{"title": "S", "kind": "list",
+                          "bullets": [{"text": "x", "basis": ""}]}],
+        }, css_override="/* 我的自定义样式 */ body { color: #123456; }")
+        self.assertIn("#123456", html, "css_override 没生效")
+        self.assertIn("张三", html)
+
     def test_every_template_has_format(self):
         """**每条模板都必须有 `format`** —— 少了前端就崩。
 

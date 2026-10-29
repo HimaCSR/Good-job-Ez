@@ -16,9 +16,39 @@
 
 import os
 
-# 模板目录 —— **相对插件目录**，不是相对当前工作目录。
-# 相对 cwd 的话，换个目录跑脚本就找不到模板了。
-TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+# 模板目录 —— **放 plugin-data，不放插件目录**。
+#
+# ## 为什么不能放插件目录
+#
+# 插件目录在开发模式下是 **junction 指向仓库** →
+# 用户上传的模板会**落进 git 仓库**（`git status` 里冒出未跟踪文件）。
+#
+# 上传的模板是**用户的数据**，不该进版本管理 ——
+# 跟 `profile.yaml` 一样，该在 `<plugin-data>/job-radar/` 下。
+#
+# 兜底：拿不到 plugin_data_dir 时（脱离包单测）→ 用环境变量指定，
+# 再兜底用插件目录下的 `templates/`（**只读场景够用**）。
+def _templates_dir() -> str:
+    try:
+        try:
+            from . import storage as _storage
+            base = _storage.plugin_data_dir("job-radar")
+        except ImportError:
+            import storage as _storage
+            base = _storage.plugin_data_dir("job-radar")
+        d = os.path.join(base, "templates")
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        env = os.environ.get("JOB_RADAR_TEMPLATES_DIR", "").strip()
+        if env:
+            os.makedirs(env, exist_ok=True)
+            return env
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "templates")
+
+
+TEMPLATES_DIR = _templates_dir()
 
 # ── 共享 HTML 骨架 ───────────────────────────────────────────────────────────
 # 所有模板共用同一份 DOM，只有 CSS 不同。
@@ -265,17 +295,31 @@ def uploaded_bg_image(template_id):
     return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
 
-def render_html(template_id, context):
+def render_html(template_id, context, css_override=None):
     """渲染一份简历 HTML。
 
     template_id: 内置 id，或用户上传转换出来的模板 id
     context:     {'title','identity','sections'} —— sections 每项：
                   {title, kind, paragraphs|bullets|tags|entries}
                   bullets/entries 的项：{text, basis}
+    css_override: **直接给 CSS**，跳过「找模板」这一步。
+
+    ## 为什么需要 css_override
+
+    **上传流程的「先预览再加入」**：
+    转换时（dry_run）**不落盘** —— 用户不点确认就不会留下垃圾模板。
+    但预览要渲染出真实版式 → **得用刚转换出来的 CSS**。
+
+    没有这个参数就只能「先落盘再预览」——
+    用户点了取消，磁盘上就多了一个模板（还要清理）。
+
+    → dry_run 预览时把 CSS 直接传进来。
     """
     from jinja2 import Template
 
-    css = get_builtin(template_id)
+    css = css_override
+    if css is None:
+        css = get_builtin(template_id)
     if css is None:
         css = _uploaded_css(template_id)
     if css is None:

@@ -861,6 +861,130 @@ def _fetch_jd(job: Dict[str, Any]) -> Dict[str, Any]:
     return job
 
 
+def _render_preview(template_id: str, css_override: str = "") -> str:
+    """用用户的真实画像渲染一个模板 → 返回 HTML。失败返回空串。
+
+    **内容全部来自用户自己的画像和经历** —— 不编造。
+
+    `css_override` —— 上传流程的 dry_run 预览用：
+    转换出的 CSS **还没落盘**，直接传进来渲染。
+    """
+    try:
+        resume_template = _sibling("resume_template")
+        resume_builder = _sibling("resume_builder")
+    except Exception:
+        return ""
+    prof = _read_profile()
+    experiences = []
+    try:
+        storage = _sibling("storage")
+        experiences = storage.list_experiences()
+    except Exception:
+        experiences = []
+
+    identity = dict(prof.get("identity") or {})
+    identity.setdefault("headline", "简历")
+    resume_data = {
+        "identity": identity,
+        "summary": "这是模板预览 —— 内容来自你的个人信息面板。",
+        "skills": list(prof.get("skills") or [])[:12],
+        "experiences": [],
+        "projects": [],
+        "education": ([{"title": " ".join(
+            x for x in [identity.get("school"), identity.get("major")] if x),
+            "meta": "", "subtitle": ""}]
+            if identity.get("school") else []),
+    }
+    for e in experiences or []:
+        bullets = [{"text": str(b), "basis": ""}
+                   for b in (e.get("bullets") or []) if str(b).strip()]
+        resume_data["experiences"].append({
+            "title": " · ".join(x for x in [e.get("company"), e.get("title")]
+                                if x),
+            "meta": " - ".join(x for x in [e.get("start"), e.get("end")] if x),
+            "subtitle": "",
+            "bullets": bullets,
+        })
+    try:
+        sections = resume_builder.build_sections(resume_data)
+        ctx = {"title": "简历", "identity": identity, "sections": sections}
+        return resume_template.render_html(template_id,
+                                          dict(ctx, show_basis=False),
+                                          css_override=css_override or None)
+    except Exception:
+        return ""
+
+
+@router.post("/templates/preview")
+def preview_template(body: Dict[str, Any]) -> Dict[str, Any]:
+    """预览一个模板渲染成什么样 —— **用用户的真实画像填内容**。
+
+    body: {template_id}
+    返回 {ok, html}
+
+    ## 为什么要有这个
+
+    用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+
+    上传的模板**转换完只登记一条记录**（名字 + CSS 片段），
+    **看不到渲染成什么样** —— 不知道版式对不对、能不能用。
+
+    → 这里用**用户的真实画像**（姓名/技能/经历）渲染一遍，
+    返回完整 HTML，前端在弹窗里显示。
+
+    **不编造内容** —— 内容全部来自用户自己的画像和经历。
+    """
+    template_id = (body.get("template_id") or "classic").strip()
+    try:
+        resume_template = _sibling("resume_template")
+        resume_builder = _sibling("resume_builder")
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+    prof = _read_profile()
+    experiences = []
+    try:
+        storage = _sibling("storage")
+        experiences = storage.list_experiences()
+    except Exception:
+        experiences = []
+
+    # **造一份「示例简历」** —— 内容全部来自用户自己的画像和经历，
+    # **不编造任何用户没有的经历**。
+    identity = dict(prof.get("identity") or {})
+    identity.setdefault("headline", "简历")
+    resume_data = {
+        "identity": identity,
+        "summary": "这是模板预览 —— 内容来自你的个人信息面板。",
+        "skills": list(prof.get("skills") or [])[:12],
+        "experiences": [],
+        "projects": [],
+        "education": ([{"title": " ".join(
+            x for x in [identity.get("school"), identity.get("major")] if x),
+            "meta": "", "subtitle": ""}]
+            if identity.get("school") else []),
+    }
+    for e in experiences or []:
+        bullets = [{"text": str(b), "basis": ""}
+                   for b in (e.get("bullets") or []) if str(b).strip()]
+        resume_data["experiences"].append({
+            "title": " · ".join(x for x in [e.get("company"), e.get("title")]
+                                if x),
+            "meta": " - ".join(x for x in [e.get("start"), e.get("end")] if x),
+            "subtitle": "",
+            "bullets": bullets,
+        })
+
+    try:
+        sections = resume_builder.build_sections(resume_data)
+        ctx = {"title": "简历", "identity": identity, "sections": sections}
+        html = resume_template.render_html(template_id, dict(ctx, show_basis=False))
+    except Exception as exc:
+        return {"ok": False, "error": "预览失败：%s" % exc}
+
+    return {"ok": True, "template_id": template_id, "html": html}
+
+
 @router.post("/resume/optimize")
 def resume_optimize(body: Dict[str, Any]) -> Dict[str, Any]:
     """针对某岗位生成定向简历。
@@ -1414,23 +1538,41 @@ def convert_template(body: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "error": "缺少文件名"}
 
     store = _sibling("template_store")
+    dry = bool(body.get("dry_run"))
     result = store.save_upload(
         filename,
         body.get("data_base64"),
         kind=body.get("kind"),
         name=body.get("name"),
         description=body.get("description"),
-        dry_run=bool(body.get("dry_run")),
+        dry_run=dry,
     )
     if not result.get("ok"):
         return result
-    return {
+
+    out = {
         "ok": True,
         "template": result["template"],
         "extracted": result.get("extracted") or [],
         "note": result.get("note") or "",
         "css_preview": result.get("css_preview") or "",
     }
+
+    # **dry_run 时返回渲染好的 HTML 预览** ——
+    #
+    # 用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
+    #
+    # dry_run 转换出的是 **CSS 片段** —— 光看 CSS 片段**看不出版式对不对**。
+    # 这里用**用户的真实画像**渲染一遍，返回完整 HTML，
+    # 前端弹窗显示 → 用户看完再决定「加入模板库」。
+    #
+    # **dry_run 不落盘** —— 用户不点确认就不会有垃圾模板。
+    if dry:
+        html = _render_preview(result["template"].get("template_id"),
+                               css_override=result.get("css_preview") or "")
+        if html:
+            out["html_preview"] = html
+    return out
 
 
 @router.post("/templates/delete")

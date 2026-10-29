@@ -1,4 +1,0 @@
-/* 从 PDF 抽取的版式（PDF 没有样式表，只能还原到这个程度） */
-body { font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
-@page { size: 217mm 306.9mm; margin: 14mm 16mm 14mm 16mm; }
-.page { width: 185mm; min-height: 278.9mm; }
