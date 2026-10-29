@@ -2323,49 +2323,91 @@ function ResumeView({ ctx, cfg }) {
   // `uploadTplRef` / `converting` / `onPickTemplate` 之前是未定义的 ——
   // 代码从 demo 转过来时抄漏了，切到这个标签就会 ReferenceError 崩掉。
   const uploadTplRef = React.useRef(null)
+  // **文件夹选择**要用**另一个** input ——
+  // 普通 `type=file` 选文件夹浏览器会报错。
+  // 带 `webkitdirectory` 的才能选整个目录。
+  const uploadDirRef = React.useRef(null)
   const [converting, setConverting] = React.useState(false)
   const [convertMsg, setConvertMsg] = React.useState('')
 
-  const onPickTemplate = async (e) => {
-    const file = e.target.files && e.target.files[0]
-    e.target.value = ''            // 允许重复选同一个文件
-    if (!file) return
-    setConverting(true)
-    setConvertMsg('正在转换 ' + file.name + ' …')
+  // 单个文件 → base64
+  //
+  // 用 FileReader 读 —— 手写 btoa(String.fromCharCode(...))
+  // 在大文件上会爆栈（展开参数过多）。
+  const readBase64 = (file) => new Promise((resolve, reject) => {
+    const fr = new FileReader()
+    fr.onload = () => {
+      const s = String(fr.result || '')
+      // 去掉 data: URL 前缀
+      resolve(s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s)
+    }
+    fr.onerror = () => reject(new Error('读取文件失败'))
+    fr.readAsDataURL(file)
+  })
+
+  // 转换一个文件，返回 {ok, name, error, extracted}
+  const convertOne = async (file) => {
     try {
-      // 用 FileReader 读 base64 —— 手写 btoa(String.fromCharCode(...))
-      // 在大文件上会爆栈（展开参数过多）。
-      const data_base64 = await new Promise((resolve, reject) => {
-        const fr = new FileReader()
-        fr.onload = () => {
-          const s = String(fr.result || '')
-          // 去掉 data: URL 前缀
-          resolve(s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : s)
-        }
-        fr.onerror = () => reject(new Error('读取文件失败'))
-        fr.readAsDataURL(file)
-      })
+      const data_base64 = await readBase64(file)
       const r = await ctx.rest('/templates/convert', {
         method: 'POST',
         body: { filename: file.name, data_base64 },
       })
       if (!r || r.ok === false) {
-        setConvertMsg((r && r.error) || '转换失败')
-        return
+        return { ok: false, name: file.name, error: (r && r.error) || '转换失败' }
       }
-      // 把「抽到了什么」告诉用户 —— 转换不是黑盒
-      const extracted = (r.extracted || []).join('、')
-      const name = (r.template && r.template.name) || file.name
-      setConvertMsg(
-        (r.note ? r.note + ' ' : '')
-        + '已加入模板库：' + name
-        + (extracted ? '（识别到：' + extracted + '）' : ''))
-      qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
+      return {
+        ok: true,
+        name: (r.template && r.template.name) || file.name,
+        extracted: r.extracted || [],
+        note: r.note || '',
+      }
     } catch (err) {
-      setConvertMsg(String((err && err.message) || err))
-    } finally {
-      setConverting(false)
+      return { ok: false, name: file.name, error: String((err && err.message) || err) }
     }
+  }
+
+  // **支持多文件** —— 单个文件和整个文件夹都能传
+  //
+  // 用户会直接选「简历模板」文件夹（里面有 .doc/.pdf 一堆）。
+  // 选文件夹要用**另一个** input（带 webkitdirectory）——
+  // 普通 file input 选文件夹会报错。
+  const onPickTemplate = async (e) => {
+    const files = Array.from((e.target.files) || [])
+    e.target.value = ''            // 允许重复选同一个文件
+    if (!files.length) return
+
+    setConverting(true)
+    setConvertMsg(files.length === 1
+      ? '正在转换 ' + files[0].name + ' …'
+      : '正在转换 ' + files.length + ' 个文件 …')
+
+    const results = []
+    for (const f of files) {
+      results.push(await convertOne(f))
+    }
+
+    const okList = results.filter((r) => r.ok)
+    const badList = results.filter((r) => !r.ok)
+    const parts = []
+    if (okList.length) {
+      parts.push('已加入模板库 ' + okList.length + ' 个：'
+        + okList.map((r) => r.name).join('、'))
+      const ex = okList[0].extracted
+      if (ex && ex.length) parts.push('（识别到：' + ex.join('、') + '）')
+      const note = okList.find((r) => r.note && r.note)
+      if (note) parts.push(note.note)
+    }
+    if (badList.length) {
+      parts.push('失败 ' + badList.length + ' 个：'
+        + badList.map((r) => r.name + '（' + (r.error || '未知错误') + '）').join('；'))
+    }
+    setConvertMsg(parts.join('  ') || '没有可转换的文件')
+
+    if (okList.length) {
+      qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
+    }
+    setConverting(false)
   }
 
   // 删掉一个上传的模板（内置模板不给删）
@@ -2451,6 +2493,20 @@ function ResumeView({ ctx, cfg }) {
                 jsx('span', { children: converting ? '转换中…' : '上传模板' }),
               ],
             }),
+            // **上传文件夹** ——
+            //
+            // 选目录要用**带 webkitdirectory 的 input**（另一个）——
+            // 普通 file input 选文件夹浏览器会报错。
+            jsx('button', {
+              key: '__upload_dir',
+              type: 'button',
+              onClick: () => uploadDirRef.current && uploadDirRef.current.click(),
+              className: 'flex min-h-32 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-(--ui-stroke-tertiary) p-4 text-xs text-(--ui-text-tertiary) transition-colors hover:border-(--ui-stroke-tertiary) hover:text-(--ui-text-secondary)',
+              children: [
+                jsx('span', { className: 'text-lg', children: '📁' }),
+                jsx('span', { children: converting ? '转换中…' : '上传文件夹' }),
+              ],
+            }),
           ])
         }),
       ]}),
@@ -2460,7 +2516,28 @@ function ResumeView({ ctx, cfg }) {
     jsx('input', {
       ref: uploadTplRef,
       type: 'file',
-      accept: '.docx,.pdf,.png,.jpg,.jpeg,.webp',
+      // **.doc 也要能选** —— 用户有 Word 存成 .doc 的模板。
+      // （后端按文件头判断真实格式，.doc 里装 docx 也能转）
+      accept: '.docx,.doc,.pdf,.png,.jpg,.jpeg,.webp',
+      className: 'hidden',
+      onChange: onPickTemplate,
+    }),
+
+    // **文件夹选择**（另一个 input）——
+    //
+    // **不能用 accept 过滤** —— 带 accept 时选目录会把文件全过滤掉。
+    // `webkitdirectory` 让浏览器返回目录里**所有**文件。
+    // React 不认识这个属性，要用 ref 手动 setAttribute。
+    jsx('input', {
+      ref: (el) => {
+        uploadDirRef.current = el
+        if (el && !el.getAttribute('webkitdirectory')) {
+          el.setAttribute('webkitdirectory', '')
+          el.setAttribute('directory', '')
+        }
+      },
+      type: 'file',
+      multiple: true,
       className: 'hidden',
       onChange: onPickTemplate,
     }),

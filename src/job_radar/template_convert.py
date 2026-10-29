@@ -497,7 +497,41 @@ def _image_to_css(data, ext):
 
 # ── 统一入口 ────────────────────────────────────────────────────────────────
 
-SUPPORTED = ("docx", "pdf", "png", "jpg", "jpeg", "webp")
+SUPPORTED = ("docx", "doc", "pdf", "png", "jpg", "jpeg", "webp")
+
+
+def _sniff_format(data):
+    """按**文件头**判断真实格式（magic number）。
+
+    返回 'docx' / 'ole2' / 'pdf' / 'png' / 'jpeg' / 'gif' / 'webp'，
+    认不出来返回 None。
+
+    ## 为什么不能只看扩展名
+
+    本机踩过：用户的模板叫「后端开发.doc」，内容其实是 docx
+    （Word 存成了 docx 但改了扩展名）。只看扩展名 → 直接拒绝 →
+    用户说「无法上传 word 格式的模板」。
+
+    **扩展名是用户随手改的，文件头不会骗人。**
+    """
+    if not data:
+        return None
+    head = data[:16]
+    if head[:4] == b"PK\x03\x04" or head[:4] == b"PK\x05\x06":
+        return "docx"
+    if head[:4] == b"\xd0\xcf\x11\xe0":
+        return "ole2"
+    if head[:5] == b"%PDF-":
+        return "pdf"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    if head[:3] == b"\xff\xd8\xff":
+        return "jpeg"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if head[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
 
 
 def convert(filename, data, kind=None):
@@ -513,10 +547,32 @@ def convert(filename, data, kind=None):
         ext = str(kind).lower().lstrip(".")
     if ext not in SUPPORTED:
         return {"ok": False,
-                "error": "只支持 .docx / .pdf / .png / .jpg / .webp（收到 .%s）" % ext}
+                "error": "只支持 .docx / .doc / .pdf / .png / .jpg / .webp（收到 .%s）" % ext}
 
     if not data:
         return {"ok": False, "error": "文件内容是空的"}
+
+    # **扩展名不可信 —— 按内容判断真实格式**
+    #
+    # 本机真踩过：用户的模板文件叫「后端开发.**doc**」，
+    # 但内容其实是 **docx**（Word 存成了 docx 只是改了扩展名）。
+    # 只看扩展名 → 直接拒绝 → 用户说「无法上传 word 格式的模板」。
+    #
+    # 判据（文件头 magic number）：
+    #   PK\x03\x04      → zip → docx
+    #   \xd0\xcf\x11\xe0 → OLE2 → **真正的旧版 .doc**（不支持）
+    #   %PDF             → PDF
+    #   \x89PNG / \xff\xd8\xff → 图片
+    real = _sniff_format(data)
+    if real == "docx":
+        ext = "docx"          # .doc 里装的是 docx
+    elif real == "ole2":
+        return {"ok": False,
+                "error": "这是旧版 .doc（Word 97-2003 二进制格式），不支持。"
+                          "请在 Word 里另存为 .docx 再上传"}
+    elif real and real != ext:
+        # 扩展名说 .pdf，内容却是图片之类 —— **信内容**
+        ext = real if real in SUPPORTED else ext
 
     try:
         if ext == "docx":
