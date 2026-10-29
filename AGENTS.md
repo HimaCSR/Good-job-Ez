@@ -10,6 +10,25 @@
 
 ---
 
+## 怎么认出「这是那个项目」
+
+你可能是新开的对话，**不知道用户上一轮在改什么**。三条线索，任一条都能认出来：
+
+| 线索 | 怎么用 |
+| --- | --- |
+| **本文件** | 你在仓库里开工 → cwd 就是仓库 → `AGENTS.md` 会指向接手指南 |
+| **Hermes Project** | 桌面端有 Project「Good-job-Ez 好岗好找」，锚定到这个仓库 |
+| **历史会话** | `session_search(query='好岗好找 OR job_radar OR Good-job-Ez', sort='newest')` 能捞到上一轮对话。**FTS5 默认 AND 所有词 —— 必须用 OR**，全词 AND 会搜不到 |
+
+**认出来之后**：读 `docs/新对话接手指南.md`（硬性要求 / 当前进度 / 下一步 /
+**踩过的坑**），再 `skill_view(name='job-radar')`（坑更细，含本轮所有新坑）。
+
+**别做的事**：不要凭猜测重建上下文。用户 2026-10-28 明确问过
+「新对话怎么知道我要迭代的是这个对话的项目」——
+**答案就是上面三条**，不是「AI 应该猜得到」。
+
+---
+
 ## 本机环境变量
 
 需要本机路径时用这些变量，别把绝对路径写进仓库：
@@ -36,13 +55,17 @@ bash scripts/dev.sh check
 src/job_radar/            agent 半边（Python，跑在 Hermes 网关里）
   ├── plugin.yaml         元数据 + 配置 schema
   ├── tools.py            8 个工具的实现
-  ├── matcher.py          本地打分（职位名30+技能30+城市20+薪资20）
+  ├── matcher.py          本地打分（主攻30/也投15 + 技能30 + 城市20 + 薪资20 + 方向10）
   ├── storage.py          SQLite：jobs / runs / resumes / resume_templates
   ├── resume_*.py         模板库 / 匹配优化 / PDF 导出与档案
-  ├── mock_provider.py    三个缺口的假数据（接口形状与真实现一致）
+  ├── mock_provider.py    假数据（接口形状与真实现一致，三个缺口现在都有真实现）
+  ├── city_codes.py       智联城市码表（36 个实测通过的）
+  ├── browser_session.py  插件专用浏览器 + 登录态
+  ├── apply_gate.py       投递三道门
+  ├── template_convert.py .docx/.pdf 版式参数抽取
   ├── dashboard/          设置页后端 API（FastAPI）
   ├── desktop/plugin.js   桌面半边（React 设置页）
-  └── tests/              123 个单元测试
+  └── tests/              313 个单元测试
 ```
 
 ## 三条铁律
