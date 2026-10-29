@@ -217,14 +217,37 @@ class TestCitiesEndpoint(unittest.TestCase):
         self.assertIn("boss_city_codes", registered,
                       "boss_city_codes 没注册 —— /cities 会 500")
 
-    def test_union_contains_both_only_cities(self):
-        """并集里既有智联独有的，也有 BOSS 独有的。"""
+    def test_union_covers_both_tables(self):
+        """并集要**覆盖两站各自的全部城市**。
+
+        2026-10-29 智联码表扩到 169 个（从 SEO 页读的准确码），
+        **已经包含 BOSS 那 63 个** —— 所以现在是「智联 ⊇ BOSS」。
+
+        这个断言写成「并集覆盖两站」而不是「BOSS 有独有城市」——
+        码表变大后后者会失效，但前者永远成立。
+        """
         from city_codes import CITY_CODES as ZL
         from boss_city_codes import CITY_CODES as BOSS
-        zl_only = set(ZL) - set(BOSS)
-        boss_only = set(BOSS) - set(ZL)
-        self.assertTrue(zl_only, "两站码表应该不完全一样")
-        self.assertTrue(boss_only, "BOSS 应该有些智联没有的城市")
+        union = set(ZL) | set(BOSS)
+        self.assertTrue(ZL)
+        self.assertTrue(BOSS)
+        missing = (set(ZL) | set(BOSS)) - union
+        self.assertEqual(missing, set())
+        # 智联码表已覆盖 BOSS 的全部城市
+        self.assertEqual(set(BOSS) - set(ZL), set(),
+                         "BOSS 有智联没有的城市 —— 并集逻辑要跟着调整")
+
+    def test_boss_codes_still_usable(self):
+        """**BOSS 的码不能被智联的码覆盖** —— 两套码完全独立。
+
+        智联「苏州」= 639，BOSS「苏州」= 101190400 ——
+        数字长得像但完全不是一回事。
+        """
+        from city_codes import CITY_CODES as ZL
+        from boss_city_codes import CITY_CODES as BOSS
+        self.assertNotEqual(ZL.get("苏州"), BOSS.get("苏州"))
+        self.assertEqual(len(BOSS.get("苏州", "")), 9, "BOSS 码是 9 位")
+        self.assertLessEqual(len(ZL.get("苏州", "")), 4, "智联码是 3~4 位")
 
 
 class TestSitePickerUI(unittest.TestCase):

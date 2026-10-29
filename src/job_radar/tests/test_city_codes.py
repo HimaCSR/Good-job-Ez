@@ -61,21 +61,53 @@ class TestCityCodes(unittest.TestCase):
                             "%s 的码不是数字: %r" % (name, code))
 
     def test_code_for_exact(self):
-        self.assertEqual(code_for("南宁"), "3150")
-        self.assertEqual(code_for("桂林"), "3165")
+        # **2026-10-29 全部换成「城市专码」** ——
+        # 码从智联 SEO 页读的，每个抓回来 20/20 全是那个城市。
+        #
+        # 老码是「区域码」，有的根本不是那个城市：
+        #   佛山 763 → 广州；惠州 763 → 广州；
+        #   无锡 3040 → 常州；苏州 3040 → 常州
+        self.assertEqual(code_for("南宁"), "785")
+        self.assertEqual(code_for("桂林"), "787")
         self.assertEqual(code_for("重庆"), "551")
         self.assertEqual(code_for("广州"), "763")
-        self.assertEqual(code_for("成都"), "552")
+        self.assertEqual(code_for("成都"), "801")
+        self.assertEqual(code_for("苏州"), "639")
+        self.assertEqual(code_for("西安"), "854")
 
     def test_chengdu_code_verified(self):
-        """**成都 = 552**（2026-10-29 实测）。
+        """**成都 = 801**（2026-10-29 实测）。
 
-        老文档「猜错的码」那节就写着「合肥 552 → 成都」——
-        552 一直是成都，只是码表里漏了。实测确认：
-        552 抓到 20 条，主城市成都，**其余是四川周边**
-        （眉山/德阳/泸州/广元/雅安）—— 智联**区域码**的特性。
+        **不是 552** —— 552 是「四川区域码」，抓回来是
+        成都 9 / 眉山 4 / 德阳 1 / 泸州 1 / 广元 1 / 雅安 1。
+
+        801 是**城市专码**，抓回来 **成都 20/20**。
         """
-        self.assertEqual(CITY_CODES.get("成都"), "552")
+        self.assertEqual(CITY_CODES.get("成都"), "801")
+
+    def test_city_codes_cover_many_cities(self):
+        """码表要覆盖足够多的城市 —— 用户能选的地方多。"""
+        self.assertGreaterEqual(len(CITY_CODES), 100,
+                                "码表只有 %d 个城市" % len(CITY_CODES))
+
+    def test_major_cities_use_dedicated_codes(self):
+        """**重点城市要用「城市专码」**，不是区域码。
+
+        老码表里 佛山/惠州都指向 763（广州），
+        无锡/苏州都指向 3040（常州）——
+        用户在设置页选「佛山」，抓到的是**广州**的岗位。
+        **静默发生，不报错、不警告。**
+        """
+        # 这些城市**不能**共用别的城市的码
+        self.assertNotEqual(CITY_CODES.get("佛山"), CITY_CODES.get("广州"))
+        self.assertNotEqual(CITY_CODES.get("惠州"), CITY_CODES.get("广州"))
+        self.assertNotEqual(CITY_CODES.get("无锡"), CITY_CODES.get("常州"))
+        self.assertNotEqual(CITY_CODES.get("苏州"), CITY_CODES.get("常州"))
+        # 也不能跟北京/上海这些共用
+        for a in ("佛山", "惠州", "无锡", "苏州"):
+            for b in ("北京", "上海", "广州", "深圳", "重庆"):
+                self.assertNotEqual(CITY_CODES.get(a), CITY_CODES.get(b),
+                                    "%s 和 %s 共用了同一个码" % (a, b))
 
     def test_code_table_and_unverified_do_not_overlap(self):
         """**码表和「猜错过的」列表不能有交集**。
@@ -88,8 +120,8 @@ class TestCityCodes(unittest.TestCase):
 
     def test_code_for_with_suffix(self):
         """「广西南宁」「杭州市」这种带后缀的也能认。"""
-        self.assertEqual(code_for("广西南宁"), "3150")
-        self.assertEqual(code_for("杭州市"), "540")
+        self.assertEqual(code_for("广西南宁"), "785")
+        self.assertEqual(code_for("杭州市"), "653")
 
     def test_code_for_unknown_returns_empty(self):
         """**认不出来就返回空** —— 不能瞎猜一个码。"""

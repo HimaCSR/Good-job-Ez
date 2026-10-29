@@ -65,7 +65,24 @@ def all_codes():
 
 
 def probe(bash, bb, code, kw="运营"):
-    """跑一次真实抓取，返回 (主城市名, 岗位数)。失败返回 (None, 0)。"""
+    """跑一次真实抓取。
+
+    返回 (城市名, 该城市岗位数, 总岗位数) —— **不是**「第一个码」。
+
+    ## 为什么不能取「第一个扫到的城市名」
+
+    **区域码会带邻近城市**，而且**同一个城市有多个码**
+    （实测：539 抓到「无锡 6 / 南京 4 / 苏州 3」——
+    无锡最多，但 539 在老码表里是「南京」）。
+
+    所以**判据是「这个码抓到最多的城市」**，不是「第一次遇到的城市」。
+
+    这个区别很关键 —— 取错了，城市名和码就对不上：
+    用户选「南京」却拿到无锡的岗位，或反过来。
+
+    另外这里返回**该城市的岗位数**，用来判断哪个码更「纯」：
+    20 条全是目标城市 > 12 条目标 + 8 条邻近。
+    """
     try:
         p = subprocess.run(
             [bash, bb, "site", "zhaopin/search", kw,
@@ -73,23 +90,24 @@ def probe(bash, bb, code, kw="运营"):
             capture_output=True, text=True, timeout=120,
             encoding="utf-8", errors="replace")
     except Exception:
-        return None, 0
+        return None, 0, 0
     out = (p.stdout or "").strip()
     if not out:
-        return None, 0
+        return None, 0, 0
     try:
         d = json.loads(out)
     except json.JSONDecodeError:
-        return None, 0
+        return None, 0, 0
     r = d.get("result", d)
     if not isinstance(r, dict) or "error" in r:
-        return None, 0
+        return None, 0, 0
     jobs = r.get("jobs") or []
     if not jobs:
-        return None, 0
-    # 城市名：取最常见的那个（少数岗位会跨城）
+        return None, 0, 0
+    # **取众数城市名**（少数岗位会跨城）
     c = Counter([(j.get("area") or "?").split()[0] for j in jobs])
-    return (c.most_common(1)[0][0], r.get("count", 0))
+    name, hits = c.most_common(1)[0]
+    return name, hits, len(jobs)
 
 
 def main():
@@ -104,23 +122,30 @@ def main():
           % (len(codes), len(codes) * 2.5 // 60 + 1))
     print()
 
-    mapping = {}       # 码 → 城市名
-    city_codes = {}    # 城市名 → 码
+    mapping = {}       # 码 → (城市名, 该城命中数, 总数)
+    city_best = {}     # 城市名 → (码, 命中数, 纯度)
     skipped = 0
 
     for i, code in enumerate(codes, 1):
-        name, n = probe(bash, bb, code)
+        name, hits, total = probe(bash, bb, code)
         if name and name != "?":
-            mapping[code] = name
-            # 同一个城市多个码 → 保留第一个（较小的）
-            if name not in city_codes:
-                city_codes[name] = code
+            mapping[code] = (name, hits, total)
+            # **同一个城市多个码 → 选「最纯」的那个** ——
+            # 即该城市岗位占比最高的码。
+            #
+            # 实测：无锡有 539（6/20）和 3040（0/20，常州）两个码，
+            # 还有 3255 之类。取第一个遇到的不是最好的判据。
+            prev = city_best.get(name)
+            if prev is None or hits > prev[1]:
+                city_best[name] = (code, hits, total)
         else:
             skipped += 1
         if i % 10 == 0 or i == len(codes):
             print("  [%d/%d] 已找到 %d 个城市（跳过 %d 个无效码）"
-                  % (i, len(codes), len(city_codes), skipped))
+                  % (i, len(codes), len(city_best), skipped))
         time.sleep(2.5)
+
+    city_codes = {name: str(code) for name, (code, _, _) in city_best.items()}
 
     print()
     print("=== 结果：%d 个城市 ===" % len(city_codes))
@@ -129,7 +154,10 @@ def main():
 
     out_json = os.path.join(repo, "docs", "智联城市码实测.json")
     with open(out_json, "w", encoding="utf-8") as fh:
-        json.dump({"by_name": city_codes, "by_code": mapping},
+        json.dump({"by_name": city_codes,
+                   "by_code": {str(k): list(v) for k, v in mapping.items()},
+                   "city_best": {n: [str(c), h, t]
+                                 for n, (c, h, t) in city_best.items()}},
                   fh, ensure_ascii=False, indent=1)
     print()
     print("已写入 %s" % out_json)

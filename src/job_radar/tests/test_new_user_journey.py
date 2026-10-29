@@ -166,7 +166,9 @@ class TestNewUserJourney(unittest.TestCase):
     def test_city_names_translate_to_codes(self):
         from city_codes import cities_to_codes
         self.assertEqual(cities_to_codes(["重庆", "广州", "南宁", "桂林"]),
-                         ["551", "763", "3150", "3165"])
+                         # 南宁/桂林 2026-10-29 换成「城市专码」
+                         # （老码 3150/3165 是区域码）
+                         ["551", "763", "785", "787"])
 
     # ── ③ 抓取参数校验 ──
 
