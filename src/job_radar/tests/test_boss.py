@@ -227,6 +227,58 @@ class TestCitiesEndpoint(unittest.TestCase):
         self.assertTrue(boss_only, "BOSS 应该有些智联没有的城市")
 
 
+class TestSitePickerUI(unittest.TestCase):
+    """设置页要能勾「抓取哪些站」。
+
+    ## 为什么
+
+    BOSS 接入前只有一个站（写死在配置里就够）。
+    现在两个站**各有各的城市码**（智联 3~4 位 jl、BOSS 9 位 city），
+    用户得能自己勾。
+
+    **不能一个都不选** ——
+    `args.get("sites") or cfg["sites"]` 会把空列表兜回配置值
+    （skill 里「别靠传空列表阻止网络调用」那条），
+    表现是「我全取消了怎么还在抓」。
+
+    所以前端**至少留一个**。
+    """
+
+    def _js(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(os.path.dirname(here), "desktop", "plugin.js")
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_site_picker_exists(self):
+        src = self._js()
+        self.assertIn("function SitePicker", src, "没有站点选择器")
+        self.assertIn("FETCH_SITE_META", src)
+
+    def test_both_sites_offered(self):
+        src = self._js()
+        self.assertIn("zhaopin", src)
+        self.assertIn("boss", src)
+        self.assertIn("智联招聘", src)
+        self.assertIn("BOSS直聘", src)
+
+    def test_cannot_deselect_all(self):
+        """**至少留一个站** —— 全不选会被后端兜回配置值。"""
+        src = self._js()
+        i = src.find("function SitePicker")
+        block = src[i:i + 2000]
+        self.assertIn("if (!next.length) return", block,
+                      "站点选择器允许全不选 —— 后端会兜回配置值")
+
+    def test_site_picker_in_filter_fields(self):
+        """要挂在「筛选条件」面板里（用户找得到）。"""
+        src = self._js()
+        i = src.find("function FilterFields")
+        block = src[i:i + 2500]
+        self.assertIn("SitePicker", block,
+                      "SitePicker 没挂在 FilterFields 里")
+
+
 class TestLocalAdapter(unittest.TestCase):
     """本地 adapter 文件 —— 存在且内容对。"""
 

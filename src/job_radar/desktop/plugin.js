@@ -2175,8 +2175,58 @@ function FilterFields({ local, set }) {
                 onChange: (e) => set('rounds_per_day', Number(e.target.value) || 0),
               }),
             }),
+            jsx(Field, {
+              label: '抓取站点',
+              hint: '两个站各用各的城市码，勾哪个就抓哪个',
+              wide: true,
+              children: jsx(SitePicker, {
+                value: local.sites || ['zhaopin'],
+                onChange: (v) => set('sites', v),
+              }),
+            }),
     ],
   })
+}
+
+/* 抓取站点 —— 智联 / BOSS 多选。
+ *
+ * **为什么要有这个** —— BOSS 接入前只有一个站，写死在配置里就够。
+ * 现在两个站各有各的城市码（智联 3~4 位 jl、BOSS 9 位 city），
+ * 用户要能自己勾「只抓智联」还是「两个都抓」。
+ *
+ * **不能一个都不选** —— `args.get("sites") or cfg["sites"]` 会把空列表
+ * 兜回配置值（见 skill 里「别靠传空列表阻止网络调用」那条）。
+ * 所以这里**至少留一个**，默认智联。 */
+const FETCH_SITE_META = {
+  zhaopin: { label: '智联招聘' },
+  boss: { label: 'BOSS直聘' },
+}
+
+function SitePicker({ value, onChange }) {
+  const list = Array.isArray(value) && value.length ? value : ['zhaopin']
+  const toggle = (name) => {
+    const next = list.includes(name)
+      ? list.filter((x) => x !== name)
+      : [...list, name]
+    // **至少留一个** —— 全不选会被后端兜回配置值，看起来像「没生效」
+    if (!next.length) return
+    onChange(next)
+  }
+  return jsxs('div', { className: 'flex flex-wrap gap-1.5', children:
+    Object.keys(FETCH_SITE_META).map((site) => {
+      const on = list.includes(site)
+      return jsx('button', {
+        key: site,
+        type: 'button',
+        className: cn(
+          'rounded-full border px-2.5 py-0.5 text-xs',
+          on
+            ? 'border-(--ui-accent) text-(--ui-text-primary)'
+            : 'border-(--ui-stroke-tertiary) text-(--ui-text-tertiary) hover:text-(--ui-text-primary)'),
+        onClick: () => toggle(site),
+        children: FETCH_SITE_META[site].label,
+      })
+    }) })
 }
 
 // ── 主视图 ──────────────────────────────────────────────────────────────────
