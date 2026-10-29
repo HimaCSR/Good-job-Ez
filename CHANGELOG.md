@@ -11,6 +11,44 @@
 
 ### 新增
 
+- **BOSS 直聘接入**（2026-10-29）
+  - **本地 adapter**（`~/.bb-browser/sites/boss/search.js`）——
+    私有 adapter 优先于社区库
+  - **`bbclient.ensure_boss_context()`** —— BOSS 的 `joblist.json` API
+    **必须在 zhipin 页面上下文里**发（要 anti-content token），
+    没有就 `open` 一个 BOSS 搜索页（社区版 adapter 直接跑会**超时**）
+  - **`boss_city_codes.py`** —— BOSS 城市码表（63 个，**官方接口核对**）：
+    `wapi/zpgeek/common/data/city/site.json` → 400 个城市码
+  - **`scan` 按站点分码表** —— 智联 3~4 位 `jl`、BOSS 9 位 `city`，
+    **混用会静默抓到别的城市**
+  - **FIELD_MAP 两套字段名都认** —— 社区 adapter 返 `title`/`company`，
+    原表只认 `name`/`brandName` → **抓回来的岗位标题和公司全是空**。
+    统一词表名放后面（`_normalize` 按插入顺序取，后者覆盖前者）
+  - **`cityName` 映射到新增的 `city` 字段** —— 它只给「城市」，
+    映射成 `area` 会**把区县信息冲掉**
+  - **`scripts/verify-boss-city-codes.sh`** —— 官方接口交叉核对
+    + 逐个实测抓取（可只验几个城市）
+  - **`scripts/fetch_boss_cities.mjs`** —— 用 CDP 直连抓城市全表
+    （`bb-browser eval` 走命令行，**有 8191 字符上限**会截断长代码）
+- **模板上传真机修复**（2026-10-29）
+  - **`.doc` 里装 docx 能传** —— 按文件头（magic number）判真实格式，
+    不只认扩展名。用户的「后端开发.doc」内容其实是 docx
+  - **真·旧版 .doc 明确提示** —— 「请在 Word 里另存为 .docx 再上传」，
+    不再只说「不支持」
+  - **支持选文件夹** —— 新增带 `webkitdirectory` 的独立 input
+    （普通 file input 选目录浏览器直接报错）；**那个 input 不带 `accept`**
+    （带了会把目录里的文件全过滤掉）
+  - **`accept` 加 `.doc`** —— 否则文件选择框里根本选不到
+  - **`onPickTemplate` 支持多文件** —— 逐个转换，汇总成功/失败
+  - **图片尺寸用标准库读文件头** —— 不再用 PIL
+    （CI 没装 PIL → 读不到尺寸 → 走 A4 兜底 → `297 != 315`）
+- **`tests/test_ci_parity.py`（6 个）** —— 「本机 3.14 ≠ CI 3.11~3.13」的回归测试
+  - 核心模块顶层不许 import PIL
+  - 单测不许 import Hermes 的包（自己造假模块塞 `sys.modules`）
+- **`dev.sh check` 第 8 步** —— **多 Python 版本验证**（用 `py` 启动器逐个跑
+  3.12/3.13/3.11，没装的跳过）—— 提交前 10 秒知道 CI 会不会红
+- **`tests/test_boss.py`（15 个）**、**`tests/test_template_upload.py`（12 个）**
+
 - **招聘站浏览器与登录**（`browser_session.py`）
   - 登录态只在浏览器里 → 插件不碰密码、不碰验证码，给用户一个
     「打开招聘网站登录」的地方
