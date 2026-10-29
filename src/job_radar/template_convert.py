@@ -30,7 +30,7 @@
 环境里没有 python-docx、没有 PDF 库 —— 所以：
 - `.docx` 用标准库 `zipfile` + `xml.etree`（docx 就是 zip + XML）
 - `.pdf` 用正则抽文本流（`Tj` / `TJ` 操作符）
-- 图片用 PIL 拿尺寸
+- 图片尺寸用**标准库读文件头**（PNG/JPEG/GIF/WebP），不依赖 PIL
 
 **不新增依赖**是这个项目的硬规矩（见 CONTRIBUTING）。
 """
@@ -369,6 +369,88 @@ def _pdf_unescape(s):
 
 # ── 图片 ────────────────────────────────────────────────────────────────────
 
+def _image_size(data):
+    """图片像素尺寸 —— **只用标准库**。
+
+    ## 为什么不用 PIL
+
+    项目的硬规矩是「零额外依赖」（见 CONTRIBUTING）。
+    而 PIL 在本机 3.14（Hermes 自带）有、**CI 的 3.11/3.12/3.13 没有**
+    → 本机测试全绿、CI 全红。
+
+    PNG 和 JPEG 的尺寸都在文件头里，标准库够用：
+    - **PNG**：8 字节签名 + IHDR chunk，宽高是 4 字节大端
+    - **JPEG**：扫 SOF0~SOF15 标记（**排除 DHT/DAC/RSTn**），取段里的宽高
+    - **GIF**：头 6 字节后是宽高（小端）
+    - **WebP**：RIFF 容器，分 VP8 / VP8L / VP8X 三种
+    """
+    if not data:
+        return None, None
+
+    # ── PNG ──
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        # IHDR：长度(4) 类型(4) 宽(4) 高(4)
+        if len(data) >= 24 and data[12:16] == b"IHDR":
+            w = int.from_bytes(data[16:20], "big")
+            h = int.from_bytes(data[20:24], "big")
+            return w, h
+        return None, None
+
+    # ── GIF ──
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        if len(data) >= 10:
+            w = int.from_bytes(data[6:8], "little")
+            h = int.from_bytes(data[8:10], "little")
+            return w, h
+        return None, None
+
+    # ── JPEG ──
+    if data[:2] == b"\xff\xd8":
+        i = 2
+        n = len(data)
+        while i + 9 < n:
+            if data[i] != 0xFF:
+                i += 1
+                continue
+            marker = data[i + 1]
+            # 填充字节
+            if marker in (0xFF, 0x01) or 0xD0 <= marker <= 0xD9:
+                i += 2
+                continue
+            seg_len = int.from_bytes(data[i + 2:i + 4], "big")
+            # SOF0~SOF15（排除 DHT=c4 / DAC=cc / RSTn=d0-d7）
+            if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                h = int.from_bytes(data[i + 5:i + 7], "big")
+                w = int.from_bytes(data[i + 7:i + 9], "big")
+                return w, h
+            i += 2 + seg_len
+        return None, None
+
+    # ── WebP ──
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        chunk = data[12:16]
+        if chunk == b"VP8X" and len(data) >= 30:
+            w = int.from_bytes(data[24:27], "little") + 1
+            h = int.from_bytes(data[27:30], "little") + 1
+            return w, h
+        if chunk == b"VP8 " and len(data) >= 30:
+            # 有损：帧头里找 0x9d012a 标记
+            k = data.find(b"\x9d\x01\x2a", 20)
+            if k >= 0 and k + 7 <= len(data):
+                w = int.from_bytes(data[k + 3:k + 5], "little") & 0x3FFF
+                h = int.from_bytes(data[k + 5:k + 7], "little") & 0x3FFF
+                return w, h
+        if chunk == b"VP8L" and len(data) >= 25:
+            b = data[21:25]
+            bits = int.from_bytes(b, "little")
+            w = (bits & 0x3FFF) + 1
+            h = ((bits >> 14) & 0x3FFF) + 1
+            return w, h
+        return None, None
+
+    return None, None
+
+
 def _image_to_css(data, ext):
     """图片 → 「底图 + 文字层」。
 
@@ -379,12 +461,11 @@ def _image_to_css(data, ext):
     p["_extracted"] = []
     width_px = height_px = None
     try:
-        from PIL import Image
-        img = Image.open(io.BytesIO(data))
-        width_px, height_px = img.size
-        p["_extracted"].append("图片尺寸")
+        width_px, height_px = _image_size(data)
+        if width_px and height_px:
+            p["_extracted"].append("图片尺寸")
     except Exception:      # noqa: BLE001
-        # 没有 PIL 也能做 —— 只是拿不到尺寸
+        # 读不到尺寸也能做 —— 只是按 A4 兜底
         pass
 
     if width_px and height_px:

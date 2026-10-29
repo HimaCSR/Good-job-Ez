@@ -40,6 +40,7 @@ class TestNewUserJourney(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="jr-newuser-")
         self._restore = []
+        self._sysmods = []
 
         # **① 隔离数据目录** ——
         #
@@ -52,14 +53,21 @@ class TestNewUserJourney(unittest.TestCase):
         # 两个都要 patch。本机踩过：
         # 只 patch 了 `plugins.plugin_storage` → 测试把
         # 「A公司/B公司」写进了用户真实的经历库。
-        try:
-            from plugins import plugin_storage
-            self._restore.append(
-                (plugin_storage, "plugin_data_dir",
-                 plugin_storage.plugin_data_dir))
-            plugin_storage.plugin_data_dir = lambda name: self.tmp
-        except ImportError:
-            pass
+        # **造一个假的 `plugins.plugin_storage`** ——
+        # CI 上没有 Hermes（没有 `plugins` 包），
+        # 直接 `from plugins import plugin_storage` 会 ModuleNotFoundError。
+        # 本机 3.14 有（Hermes 自带）→ 本机全绿、CI 全红。
+        #
+        # 所以这里自己造一个塞进 sys.modules —— **不依赖 Hermes 环境**。
+        import types
+        plugins_pkg = types.ModuleType("plugins")
+        plugins_pkg.__path__ = []
+        ps_mod = types.ModuleType("plugins.plugin_storage")
+        ps_mod.plugin_data_dir = lambda name: self.tmp
+        plugins_pkg.plugin_storage = ps_mod
+        sys.modules["plugins"] = plugins_pkg
+        sys.modules["plugins.plugin_storage"] = ps_mod
+        self._sysmods += ["plugins", "plugins.plugin_storage"]
 
         import storage as jr_storage
         self._restore.append(
@@ -93,6 +101,8 @@ class TestNewUserJourney(unittest.TestCase):
                 setattr(obj, name, old)
             except Exception:
                 pass
+        for name in self._sysmods:
+            sys.modules.pop(name, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _assert_no_real_data_touched(self):
@@ -103,9 +113,9 @@ class TestNewUserJourney(unittest.TestCase):
         测试把「A公司/B公司」写进了用户真实的经历库。
         """
         import storage as jr_storage
-        from plugins import plugin_storage
         tmp = os.path.abspath(self.tmp)
-        for label, fn in (("plugins.plugin_storage", plugin_storage.plugin_data_dir),
+        for label, fn in (("plugins.plugin_storage",
+                           sys.modules["plugins.plugin_storage"].plugin_data_dir),
                           ("storage", jr_storage.plugin_data_dir)):
             real = os.path.abspath(fn("job-radar"))
             self.assertEqual(real, tmp,
