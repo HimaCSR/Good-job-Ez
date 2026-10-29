@@ -60,6 +60,9 @@ FIELD_MAP = {
         "cityName": "city",
         "jobExperience": "experience", "jobDegree": "degree",
         "skills": "tags", "jobId": "job_id",
+        # **securityId** —— BOSS 详情页要用它（不是 job_id）。
+        # 不存的话抓不到 JD → 简历优化只能靠标题猜要求。
+        "securityId": "security_id",
         # ── 统一词表名（优先，覆盖上面的）──
         "title": "title", "company": "company", "salary": "salary",
         "area": "area", "experience": "experience", "degree": "degree",

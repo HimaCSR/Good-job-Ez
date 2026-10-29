@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS jobs (
   description TEXT,
   score INTEGER, reasons TEXT, missing TEXT,
   first_seen TEXT, last_seen TEXT,
-  status TEXT DEFAULT 'new'
+  status TEXT DEFAULT 'new',
+  security_id TEXT        -- BOSS 详情页要用它（不是 job_id）
 );
 CREATE TABLE IF NOT EXISTS resumes (
   resume_id TEXT PRIMARY KEY,
@@ -103,6 +104,10 @@ def _ensure_columns(conn):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(jobs)")}
     if "pushed_at" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN pushed_at TEXT")
+    # **security_id** —— BOSS 详情页要它（不是 job_id）。
+    # 没有它 → 抓不到 JD → 简历优化只能靠岗位标题猜要求。
+    if "security_id" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN security_id TEXT")
 
 
 class _Conn(sqlite3.Connection):
@@ -196,8 +201,8 @@ def upsert(job, scored):
             """INSERT INTO jobs
                (job_id, source, title, company, salary, city, experience, degree,
                 skills, url, description, score, reasons, missing,
-                first_seen, last_seen)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                first_seen, last_seen, security_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(job_id) DO UPDATE SET
                  source=excluded.source, title=excluded.title,
                  company=excluded.company, salary=excluded.salary,
@@ -205,7 +210,8 @@ def upsert(job, scored):
                  degree=excluded.degree, skills=excluded.skills,
                  url=excluded.url, description=excluded.description,
                  score=excluded.score, reasons=excluded.reasons,
-                 missing=excluded.missing, last_seen=excluded.last_seen""",
+                 missing=excluded.missing, last_seen=excluded.last_seen,
+                 security_id=excluded.security_id""",
             (jid, job.get("source", ""), job.get("title", ""),
              job.get("company", ""), job.get("salary", ""),
              job.get("area") or job.get("city", ""),
@@ -215,7 +221,7 @@ def upsert(job, scored):
              scored["score"],
              json.dumps(scored.get("reasons") or [], ensure_ascii=False),
              json.dumps(scored.get("missing") or [], ensure_ascii=False),
-             now, now))
+             now, now, job.get("security_id", "")))
     return is_new
 
 
@@ -402,6 +408,42 @@ def list_experiences() -> List[dict]:
     return out
 
 
+def _split_bullets(bullets) -> list:
+    """把 bullets 整理成「一行一条」的列表。
+
+    ## 为什么要在保存时拆
+
+    **用户会在一个输入框里写好几行**（用换行分隔），
+    但前端把整个框的内容存成**一个字符串** ——
+    于是 `bullets` 数组里只有 1 个元素，**内容却含 3 段**。
+
+    后果：
+    - `_build_work_entries` 逐条判断命中时，**一整段只算一条** ——
+      只要有一句命中，整段（含不相关的句子）都进简历
+    - 简历里会出现一个**超长的 bullet**（三段挤在一起）
+
+    → **保存时按行拆开**，每行一条。
+    **保留原有的 `- ` / `• ` 前缀**（前端要显示成 bullet 样式）。
+
+    ## 只在这里拆一次
+
+    拆完存进数据库 → 后续读取、匹配、渲染都用拆好的列表，
+    不用在每个消费点重复拆。
+    """
+    out = []
+    for b in bullets or []:
+        text = str(b or "").strip()
+        if not text:
+            continue
+        # **一行里可能还有多个 bullet**（用 `；` 或 `。` 分的）——
+        # 但只按**换行**拆，不按句号拆（一句完整的话不能拆两半）。
+        for line in text.split("\n"):
+            line = line.strip()
+            if line:
+                out.append(line)
+    return out
+
+
 def upsert_experience(exp: dict) -> dict:
     """新增或更新一条经历。
 
@@ -425,7 +467,7 @@ def upsert_experience(exp: dict) -> dict:
     if not exp_id:
         exp_id = "exp-" + uuid.uuid4().hex[:12]
 
-    bullets = exp.get("bullets") or []
+    bullets = _split_bullets(exp.get("bullets") or [])
     tags = exp.get("tags") or []
 
     with _conn() as c:

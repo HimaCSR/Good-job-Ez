@@ -796,6 +796,71 @@ def resume_requirements(job_id: str) -> Dict[str, Any]:
     }
 
 
+def _fetch_jd(job: Dict[str, Any]) -> Dict[str, Any]:
+    """抓一次岗位详情，把 JD 写回岗位记录。返回岗位（或 None）。
+
+    ## 为什么必须有这一步
+
+    **列表页不返回 JD** —— 描述、要求、学历、年限全在详情页里。
+    没有 JD → `extract_requirements` 只能从岗位标题抽 →
+    抽出的要求跟用户经历里的技能**对不上** →
+    `_build_work_entries` 把**所有 bullet 都过滤掉** →
+    **简历的工作经历章节只有公司/职位/时间，没有内容**。
+
+    ## 两个站的详情页参数不一样
+
+    | 站 | adapter | 参数 |
+    | --- | --- | --- |
+    | 智联 | `zhaopin/detail` | `jobId`（job_id 去掉非字母数字） |
+    | BOSS | `boss/detail` | `securityId`（**不是 job_id**） |
+
+    **BOSS 抓不到 securityId 就没法抓 JD** —— 所以抓取时要把它存进
+    `jobs.security_id`（`tools.FIELD_MAP["boss"]` 负责映射）。
+    """
+    try:
+        bbclient = _sibling("bbclient")
+        storage = _sibling("storage")
+    except Exception:
+        return None
+
+    source = (job.get("source") or "").strip()
+    job_id = str(job.get("job_id") or "")
+    detail = None
+
+    if source == "boss":
+        sec = (job.get("security_id") or "").strip()
+        if not sec:
+            return None
+        detail = bbclient.fetch_detail("boss", sec)
+    elif source == "zhaopin":
+        if not job_id:
+            return None
+        detail = bbclient.fetch_detail("zhaopin", job_id)
+    else:
+        return None
+
+    if not detail or detail.get("error"):
+        return None
+
+    # **BOSS 的详情返回嵌套结构** —— JD 在 `job.description`
+    desc = (detail.get("description") or "").strip()
+    if not desc:
+        desc = ((detail.get("job") or {}).get("description") or "").strip()
+    if not desc:
+        return None
+
+    # 写回岗位记录（下次就不用再抓）
+    try:
+        with storage._conn() as conn:
+            conn.execute("UPDATE jobs SET description = ? WHERE job_id = ?",
+                         (desc, job_id))
+    except Exception:
+        pass
+    job = dict(job)
+    job["description"] = desc
+    return job
+
+
 @router.post("/resume/optimize")
 def resume_optimize(body: Dict[str, Any]) -> Dict[str, Any]:
     """针对某岗位生成定向简历。
@@ -816,6 +881,17 @@ def resume_optimize(body: Dict[str, Any]) -> Dict[str, Any]:
     job = storage.get_job(job_id)
     if not job:
         return {"ok": False, "error": "找不到岗位 %s" % job_id}
+
+    # **JD 缺失就抓一次详情页** ——
+    #
+    # 列表页**不返回 JD**（描述、要求全在详情页里）。
+    # 不抓的话 `job["description"]` 是空的 →
+    # `extract_requirements` 只能从岗位标题抽 → 抽出 1 条要求 →
+    # 用户经历里的 bullet 全都命中不了 → **工作经历章节是空的**。
+    #
+    # **BOSS 用 securityId，智联用 jobId** —— 两者都在岗位记录里。
+    if not (job.get("description") or "").strip():
+        job = _fetch_jd(job) or job
 
     prof = _read_profile()
     # **结构化经历优先** ——

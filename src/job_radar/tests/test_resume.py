@@ -163,6 +163,68 @@ class TestTemplate(unittest.TestCase):
         self.assertTrue(info["builtin"])
         self.assertEqual(info["name"], "经典单栏")
 
+    def test_split_bullets_splits_by_newline(self):
+        """**保存时按行拆 bullet** —— 用户会在一个框里写好几行。
+
+        前端把整个框存成**一个字符串** → bullets 数组只有 1 个元素，
+        内容却含 3 段 → 简历里出现一个超长 bullet。
+
+        → 存进数据库前按**换行**拆开。
+        """
+        from storage import _split_bullets
+        out = _split_bullets([
+            "- 第一条\n- 第二条\n- 第三条",
+            "单独一条",
+            "",
+        ])
+        self.assertEqual(len(out), 4, "应该拆成 4 条：%r" % out)
+        self.assertEqual(out[0], "- 第一条")
+        self.assertEqual(out[3], "单独一条")
+
+    def test_split_bullets_keeps_sentences_intact(self):
+        """**只按换行拆** —— 一句话不能拆成两半。"""
+        from storage import _split_bullets
+        out = _split_bullets(["做了 A。然后做了 B。"])
+        self.assertEqual(len(out), 1, "句号不该拆：%r" % out)
+        self.assertIn("然后做了 B", out[0])
+
+    def test_jobs_table_has_security_id(self):
+        """**jobs 表要有 security_id** —— BOSS 详情页要用它。
+
+        没有它 → 抓不到 JD → 简历优化只能靠岗位标题猜要求 →
+        **工作经历章节是空的**。
+        """
+        import storage
+        cols = {r[1] for r in storage._conn().execute(
+            "PRAGMA table_info(jobs)")}
+        self.assertIn("security_id", cols,
+                      "jobs 表没有 security_id 列 —— BOSS 抓不到 JD")
+
+    def test_boss_field_map_has_security_id(self):
+        """**FIELD_MAP 要映射 securityId** —— 否则入库就丢了。"""
+        import tools
+        self.assertEqual(tools.FIELD_MAP["boss"].get("securityId"),
+                         "security_id")
+
+    def test_fetch_detail_accepts_nested_boss_shape(self):
+        """**BOSS 详情是嵌套结构** —— `{job:{description}}`。
+
+        `bbclient.fetch_detail` 原来只认扁平的 `description`/`title`
+        → BOSS 一律返回「详情页没返回内容」→ **JD 永远抓不到**。
+        """
+        import bbclient
+        orig = bbclient.run_site
+        try:
+            bbclient.run_site = lambda *a, **k: {
+                "job": {"name": "跨境电商运营", "description": "JD 正文"},
+                "company": {"name": "某公司"},
+            }
+            out = bbclient.fetch_detail("boss", "sec123")
+            self.assertNotIn("error", out, "嵌套结构没被识别：%r" % out)
+            self.assertEqual(out.get("description"), "JD 正文")
+        finally:
+            bbclient.run_site = orig
+
     def test_every_template_has_format(self):
         """**每条模板都必须有 `format`** —— 少了前端就崩。
 

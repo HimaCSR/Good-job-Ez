@@ -246,9 +246,31 @@ def fetch_detail(site, job_id, timeout=90):
         return {"error": "未知站点: %s" % site}
     if "error" in data:
         return data
-    # detail adapter 返回的就是一份岗位
-    if data.get("description") or data.get("title"):
-        log.info("抓到详情 site=%s job=%s JD=%d字",
-                 site, job_id, len(data.get("description") or ""))
+
+    # **BOSS 的详情是嵌套结构** —— `{job:{description,...}, company:{...}}`
+    #
+    # 原来只认扁平的 `description`/`title` → BOSS 一律返回
+    # 「详情页没返回内容」→ **JD 永远抓不到** → 简历优化只能靠标题猜。
+    #
+    # **智联是扁平的**（`{title, description, ...}`），BOSS 是嵌套的 ——
+    # 这里两种都认。
+    desc = (data.get("description") or "").strip()
+    title = (data.get("title") or "").strip()
+    if not desc and not title:
+        nested = data.get("job") or {}
+        desc = (nested.get("description") or "").strip()
+        title = (nested.get("name") or nested.get("title") or "").strip()
+        if desc or title:
+            # **摊平成统一词表** —— 调用方不用管哪个站
+            flat = dict(nested)
+            flat["description"] = desc
+            flat["title"] = title
+            company = data.get("company") or {}
+            if company:
+                flat["company"] = company.get("name") or ""
+            data = flat
+
+    if desc or title:
+        log.info("抓到详情 site=%s job=%s JD=%d字", site, job_id, len(desc))
         return data
     return {"error": "详情页没返回内容"}
