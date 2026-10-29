@@ -2685,7 +2685,11 @@ function TemplateCard({ tpl, active, onToggle, onDelete }) {
                   jsx('div', { className: 'mt-1 h-1 rounded-sm bg-(--ui-stroke-tertiary)', style: { width: '50%' } }),
                 ],
               })
-            : jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: tpl.format.toUpperCase() }),
+            // **兜底** —— 后端漏字段时前端会整页崩（不是卡片不好看）
+            : jsx('div', {
+              className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+              children: String(tpl.format || 'html').toUpperCase(),
+            }),
           jsx('span', {
             className: cn(
               'absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full text-[0.625rem]',

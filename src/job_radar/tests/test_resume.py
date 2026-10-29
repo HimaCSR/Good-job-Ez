@@ -163,6 +163,33 @@ class TestTemplate(unittest.TestCase):
         self.assertTrue(info["builtin"])
         self.assertEqual(info["name"], "经典单栏")
 
+    def test_every_template_has_format(self):
+        """**每条模板都必须有 `format`** —— 少了前端就崩。
+
+        ## 本机真崩过
+
+        桌面端渲染模板卡时写了 `tpl.format.toUpperCase()`
+        （显示「DOCX」「PDF」角标）。
+
+        `template_info()` 原来只返回 `name`/`description`/`builtin`
+        —— **内置模板没有 `format`** →
+        `Cannot read properties of undefined (reading 'toUpperCase')`
+        → **整个路由渲染失败**（不是卡片不好看，是整页报错）。
+
+        → 后端**必须**给 `format`，前端也要兜底。
+        """
+        for t in list_all():
+            self.assertIn("format", t,
+                          "模板 %r 没有 format 字段 —— 前端会崩"
+                          % t.get("template_id"))
+            self.assertTrue(t.get("format"),
+                            "模板 %r 的 format 是空的" % t.get("template_id"))
+
+    def test_builtin_format_is_html(self):
+        """内置模板是 **HTML 模板**（不是某个上传文件的格式）。"""
+        for tid in BUILTIN:
+            self.assertEqual(template_info(tid)["format"], "html")
+
     def test_render_has_identity(self):
         html = render_html("classic", {
             "title": "T", "identity": {"name": "张三"},

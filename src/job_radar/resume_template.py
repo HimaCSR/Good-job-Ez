@@ -289,15 +289,35 @@ def render_html(template_id, context):
 
 
 def template_info(template_id):
-    """模板的展示信息（名字、描述、是否内置）。"""
+    """模板的展示信息（名字、描述、格式、是否内置）。
+
+    ## `format` **必须有** —— 少一个字段前端就崩
+
+    前端渲染模板卡时写了 `tpl.format.toUpperCase()`
+    （显示「DOCX」「PDF」这种角标）。
+
+    **本机真崩过**：`template_info` 原来只返回
+    `name`/`description`/`builtin` —— **没有 `format`** →
+    `Cannot read properties of undefined (reading 'toUpperCase')`
+    → **整个路由渲染失败**（不是卡片不好看，是整页白屏报错）。
+
+    → **这里必须给 `format`**，前端才拿得到。
+    前端也要有兜底（`(tpl.format || 'docx')`）—— 两边都做。
+    """
     tpl = BUILTIN.get(template_id)
     if tpl:
         return {"template_id": template_id, "name": tpl["name"],
-                "description": tpl["description"], "builtin": True}
+                "description": tpl["description"],
+                # 内置模板是 **HTML 模板**（不是某个上传文件的格式）
+                "format": tpl.get("format") or "html",
+                "builtin": True}
     path = os.path.join(TEMPLATES_DIR, template_id + ".css")
     if os.path.exists(path):
         return {"template_id": template_id, "name": template_id,
-                "description": "上传的模板", "builtin": False}
+                "description": "上传的模板",
+                # 上传的 .css 是从 docx/pdf 转换来的 —— 默认 docx
+                "format": "docx",
+                "builtin": False}
     return None
 
 
