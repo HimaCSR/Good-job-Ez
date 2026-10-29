@@ -221,6 +221,143 @@ class TestPdfConvert(unittest.TestCase):
         self.assertIn(".page {", r["css"])
 
 
+class TestPdfStyleExtraction(unittest.TestCase):
+    """**PDF 要抽出视觉风格** —— 不只是页面尺寸。
+
+    ## 为什么
+
+    用户：「我上传的模板是存在UI风格设计的，转换成模板后，
+    对应风格并没有跟着转换过来。」
+
+    原来 `_pdf_to_css` **只抽页面尺寸** —— 配色/字号/字体/装饰全丢
+    → 生成的模板跟原文件完全不像。
+
+    ## PDF 里其实有这些信息
+
+    PDF 没有「样式表」，但**绘图指令里有**：
+
+    | 指令 | 含义 |
+    | --- | --- |
+    | `r g b rg` | 填充色 |
+    | `/F4 34 Tf` | 字号 |
+    | `/BaseFont /XXX` | 字体名（在**对象定义**里，不在压缩流里） |
+    | `x y w h re f` | **填充**的矩形 |
+    | `x y w h re W* n` | **裁剪**路径（不画 —— 不能当色块！） |
+
+    ## 三个坑
+
+    1. **内容流是压缩的** —— 不解压就找不到任何指令
+    2. **最大的流往往是内嵌字体文件**（几百 KB TTF 二进制）——
+       取最大的流 → 一个 `Tf` 都抽不到
+    3. **`re` 后面跟 `W*` 的是裁剪路径** —— 当成色块 →
+       标题栏底色变成强调色 → **白字蓝底，字看不见**
+    """
+
+    @staticmethod
+    def _styled_pdf():
+        """造一个带配色/字号/装饰的 PDF（FlateDecode 压缩内容流）。"""
+        import zlib
+        content = (
+            b"q\n"
+            b".2235 .251 .5176 RG .2235 .251 .5176 rg\n"
+            b"/F4 34 Tf\n"
+            b"1 0 0 -1 83.5 700 Tm\n"
+            b"(Name) Tj\n"
+            b"ET\n"
+            b"q\n"
+            b".8471 .8784 .9412 RG .8471 .8784 .9412 rg\n"
+            b"0 0 20 2320 re\nf\n"
+            b"Q\n"
+            b"q\n"
+            b".749 .749 .749 RG .749 .749 .749 rg\n"
+            b"84 303 674 2 re\nf\n"
+            b"Q\n"
+        )
+        compressed = zlib.compress(content)
+        objs = [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            b"/Contents 4 0 R /Resources << /Font << /F4 5 0 R >> >> >>",
+            b"<< /Length %d /Filter /FlateDecode >>\nstream\n" % len(compressed)
+            + compressed + b"\nendstream",
+            b"<< /Type /Font /Subtype /Type0 /BaseFont /AAAAAA+MicrosoftYaHei >>",
+        ]
+        out = io.BytesIO()
+        out.write(b"%PDF-1.4\n")
+        offsets = []
+        for i, body in enumerate(objs, 1):
+            offsets.append(out.tell())
+            out.write(("%d 0 obj\n" % i).encode("latin-1"))
+            out.write(body)
+            out.write(b"\nendobj\n")
+        xref_at = out.tell()
+        out.write(("xref\n0 %d\n" % (len(objs) + 1)).encode("latin-1"))
+        out.write(b"0000000000 65535 f \n")
+        for off in offsets:
+            out.write(("%010d 00000 n \n" % off).encode("latin-1"))
+        out.write(("trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n"
+                   % (len(objs) + 1, xref_at)).encode("latin-1"))
+        return out.getvalue()
+
+    def test_extracts_accent_color(self):
+        """**强调色** —— 出现最多且非灰度的颜色。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        self.assertTrue(r["ok"], r.get("error"))
+        # .2235 .251 .5176 → #384083
+        self.assertEqual(r["params"]["accent_color"], "#384083")
+        self.assertIn("强调色", r["extracted"])
+
+    def test_extracts_font_size(self):
+        """**字号** —— 姓名取最大，正文取众数。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        self.assertEqual(r["params"]["name_size_pt"], 34.0)
+        self.assertIn("字号", r["extracted"])
+
+    def test_extracts_font_name(self):
+        """**字体名** —— 在对象定义里，不在压缩流里。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        # MicrosoftYaHei → "Microsoft YaHei"（**不能拆成 "Microsoft Ya Hei"**）
+        self.assertIn('"Microsoft YaHei"', r["params"]["font_family"])
+        self.assertNotIn("Microsoft Ya Hei", r["params"]["font_family"])
+
+    def test_extracts_vertical_bar(self):
+        """**竖条**（侧边色带）—— 高远大于宽的填充矩形。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        self.assertIn("_accent_bar_px", r["params"])
+        self.assertEqual(r["params"]["_accent_bar_color"], "#d8dff0")
+        self.assertIn("侧边色带", r["extracted"])
+
+    def test_extracts_divider(self):
+        """**分隔线** —— 宽远大于高、很薄的填充矩形。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        self.assertIn("_divider_px", r["params"])
+        self.assertEqual(r["params"]["_divider_color"], "#bebebe")
+
+    def test_css_applies_style_to_elements(self):
+        """**抽到的风格要真的作用到元素上** —— 否则抽了也白抽。"""
+        r = template_convert.convert("s.pdf", self._styled_pdf())
+        css = r["css"]
+        self.assertIn(".name {", css)
+        self.assertIn("#384083", css)          # 强调色
+        self.assertIn(".item-title", css)      # 正文色
+        self.assertIn("border-left", css)      # 竖条
+        self.assertIn("border-bottom", css)    # 分隔线
+
+    def test_clipping_path_is_not_a_color_block(self):
+        """**裁剪路径（`re W* n`）不是色块** ——
+        当成色块 → 标题栏底色 = 强调色 → 白字蓝底 → **字看不见**。
+        """
+        import zlib
+        content = (b".2235 .251 .5176 RG .2235 .251 .5176 rg\n"
+                   b"q\n153.125 1050 2262.5 100 re\nW* n\nQ\n")
+        compressed = zlib.compress(content)
+        r = template_convert._pdf_style(
+            b"%PDF-1.4\n" + compressed + b"\nendstream\n")
+        self.assertIsNone(r.get("_band_color"),
+                          "裁剪路径被当成了标题栏底色")
+
+
 # ── 图片 ────────────────────────────────────────────────────────────────────
 
 class TestImageConvert(unittest.TestCase):

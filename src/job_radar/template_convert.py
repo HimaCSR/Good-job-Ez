@@ -284,12 +284,342 @@ def _pdf_page_size(data):
     return (round(w * 25.4 / 72, 1), round(h * 25.4 / 72, 1))
 
 
-def _pdf_to_css(data):
-    """PDF → CSS（尽力而为）。
+# PDF 的 PostScript 字体名 → CSS font-family
+#
+# **不能靠「驼峰拆词」** —— `MicrosoftYaHei` 拆出来是
+# `Microsoft Ya Hei`（多了个空格，**认不出来**）。
+#
+# 常见中文字体的正确写法在表里；表里没有就**保持原样**
+# （浏览器认不出来也比写错强 —— 写错会落到别的字体上）。
+_PDF_FONT_NAMES = {
+    "MicrosoftYaHei": "Microsoft YaHei",
+    "MicrosoftYaHeiUI": "Microsoft YaHei UI",
+    "SimSun": "SimSun",
+    "SimHei": "SimHei",
+    "KaiTi": "KaiTi",
+    "FangSong": "FangSong",
+    "DengXian": "DengXian",
+    "SourceHanSansSC": "Source Han Sans SC",
+    "SourceHanSerifSC": "Source Han Serif SC",
+    "NotoSansCJKSC": "Noto Sans CJK SC",
+    "ArialUnicodeMS": "Arial Unicode MS",
+    "TimesNewRoman": "Times New Roman",
+    "ArialMT": "Arial",
+    "ArialBoldMT": "Arial",
+    "Calibri": "Calibri",
+    "Helvetica": "Helvetica",
+}
 
-    PDF 里没有「样式表」这回事，只有坐标指令。
-    我们只能拿到页面尺寸 + 文本是否存在 ——
-    **抽不出文字的 PDF（扫描件）会如实告诉用户**，不瞎填。
+
+def _pdf_font_to_css(name):
+    """PDF 的 PostScript 字体名 → CSS font-family 用的名字。"""
+    if not name:
+        return ""
+    if name in _PDF_FONT_NAMES:
+        return _PDF_FONT_NAMES[name]
+    # **带连字符/空格的**（已经是 CSS 写法）直接用
+    if "-" in name or " " in name:
+        return name
+    # 认不出来 → 保持原样（CSS 里加引号不会更糟）
+    if re.match(r"^[A-Za-z][A-Za-z0-9]*$", name) and len(name) >= 3:
+        return name
+    return ""
+
+
+def _pdf_streams(data):
+    """解压 PDF 里所有能解的流（FlateDecode）。
+
+    **内容流是压缩的** —— 直接在原始字节上找 `rg`/`Tf`/`Tj` **找不到**。
+    本机踩过：正则扫原始字节 → 一个 `rg` 都没有 → 以为 PDF 没样式。
+
+    → 先解压，再抽。
+
+    返回 (内容流文本列表, 原始二进制流列表)。
+    """
+    import zlib
+    texts, raws = [], []
+    for m in re.finditer(rb"stream\r?\n", data):
+        start = m.end()
+        end = data.find(b"endstream", start)
+        if end < 0:
+            continue
+        blob = data[start:end]
+        try:
+            texts.append(zlib.decompress(blob).decode("latin-1", errors="replace"))
+        except Exception:
+            raws.append(blob)
+    return texts, raws
+
+
+def _pdf_style(data):
+    """从 PDF 内容流抽**视觉风格**（配色 / 字号 / 字体）。
+
+    ## 抽得到什么
+
+    PDF 里没有「样式表」，但绘图指令里有：
+
+    | 指令 | 含义 |
+    | --- | --- |
+    | `r g b rg` | 填充色 |
+    | `r g b RG` | 描边色 |
+    | `/F4 34 Tf` | 字号（`Tf` 的第二个参数） |
+    | `/BaseFont /XXX` | 字体名 |
+
+    → **强调色** = 出现最多、且**不是灰度**的颜色
+    （灰度 = r==g==b，那是正文色不是强调色）。
+
+    ## 抽不到什么
+
+    **布局**（谁在哪、什么字号对应什么层级）——
+    PDF 只给坐标，不给语义层级。
+    所以字号只能**按大小映射**到「标题 / 姓名 / 正文」——
+    这是**近似**，不是精确还原。
+    """
+    texts, _raws = _pdf_streams(data)
+    if not texts:
+        return {}
+
+    # 找内容流 —— **要含字体指令（`Tf`）的那条**。
+    #
+    # **不能取最大的流** —— 最大的往往是**内嵌字体文件**
+    # （几百 KB 的 TTF 二进制），里面一个 `Tf` 都没有。
+    # 本机踩过：取最大流 → 字号一个都抽不到。
+    content = ""
+    for t in texts:
+        if re.search(r"/\S+\s+[\d.]+\s+Tf", t):
+            content = t
+            break
+    if not content:
+        for t in texts:
+            if re.search(r"\bre\b|\bTm\b|\bBT\b", t):
+                content = t
+                break
+    if not content:
+        content = max(texts, key=len)
+
+    out = {}
+
+    # ── 配色 ──
+    from collections import Counter
+    fills = Counter(re.findall(
+        r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", content))
+    strokes = Counter(re.findall(
+        r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+RG", content))
+    colors = fills or strokes
+    if colors:
+        accent = None
+        for (r, g, b), n in colors.most_common():
+            try:
+                rv, gv, bv = float(r), float(g), float(b)
+            except ValueError:
+                continue
+            # **灰度**（r≈g≈b）不算强调色
+            if abs(rv - gv) < 0.02 and abs(gv - bv) < 0.02:
+                continue
+            if rv > 0.95 and gv > 0.95 and bv > 0.95:
+                continue      # 纯白
+            accent = "#%02x%02x%02x" % (int(rv * 255), int(gv * 255), int(bv * 255))
+            break
+        if accent:
+            out["accent_color"] = accent
+
+        # **正文色** = 用得最多的灰度色（偏深的那个）
+        for (r, g, b), n in colors.most_common():
+            try:
+                rv = float(r)
+            except ValueError:
+                continue
+            if abs(float(r) - float(g)) < 0.02 and abs(float(g) - float(b)) < 0.02:
+                if 0.05 <= rv <= 0.75:
+                    out["title_color"] = "#%02x%02x%02x" % (
+                        int(rv * 255), int(rv * 255), int(rv * 255))
+                    break
+
+    # ── 几何（竖条 / 分隔线 / 横条） ──
+    #
+    # PDF 里没有「样式表」，但**形状是画出来的**：
+    # - **竖条**（高 >> 宽）→ 侧边色带 / 标题左侧色块
+    # - **细横线**（宽 >> 高，高度只有 1~3）→ 章节分隔线
+    # - **粗横条**（宽 >> 高，高度几十以上）→ 章节标题栏底色
+    geo = _pdf_geometry(content)
+    out.update(geo)
+
+    # ── 字号 ──
+    sizes = []
+    for m in re.finditer(r"/\S+\s+([\d.]+)\s+Tf", content):
+        try:
+            sizes.append(float(m.group(1)))
+        except ValueError:
+            continue
+    if sizes:
+        uniq = sorted(set(sizes))
+        out["_font_sizes"] = uniq
+        out["name_size_pt"] = max(uniq)
+        # **正文字号 = 出现最多的那个** ——
+        #
+        # 不要用中位数：设计稿里大标题只有 1 处，
+        # 正文出现几十次 → **众数才是正文**。
+        # 用中位数会把正文算大一号（实测 24px → 简历正文巨大）。
+        out["font_size_pt"] = Counter(sizes).most_common(1)[0][0]
+
+    # ── 字体名 ──
+    #
+    # **BaseFont 在 PDF 的「对象定义」部分**（`/BaseFont /AAAAAA+MicrosoftYaHei`），
+    # **不在压缩流里** —— 只在解压结果里找是找不到的。
+    # 本机踩过：查了 15 个流一个都没有 → 字体名抽不到。
+    raw = data.decode("latin-1", errors="replace")
+    m = re.search(r"/BaseFont\s*/([A-Za-z0-9+\-_]+)", raw)
+    if not m:
+        for t in texts:
+            m = re.search(r"/BaseFont\s*/([A-Za-z0-9+\-_]+)", t)
+            if m:
+                break
+    if m:
+        name = m.group(1)
+        # **去掉子集前缀**（`AAAAAA+MicrosoftYaHei` → `MicrosoftYaHei`）
+        name = name.split("+")[-1]
+        if name:
+            out["_pdf_font_name"] = name
+
+    return out
+
+
+def _color_close(a, b, tol=40):
+    """两个十六进制颜色接不接近（按 RGB 距离）。"""
+    try:
+        ar, ag, ab = (int(a[i:i + 2], 16) for i in (1, 3, 5))
+        br, bg, bb = (int(b[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, IndexError):
+        return False
+    return abs(ar - br) <= tol and abs(ag - bg) <= tol and abs(ab - bb) <= tol
+
+
+def _pdf_geometry(content):
+    """从 PDF 内容流抽**几何特征**（竖条 / 分隔线 / 横条）。
+
+    ## 为什么要抽
+
+    PDF 是**画出来的** —— 配色、字号、分隔线、色带全在绘图指令里。
+    之前只抽尺寸 → 用户看到的模板「跟原文件不像」。
+
+    ## 三种形状
+
+    | 形状 | 判据 | 对应什么 |
+    | --- | --- | --- |
+    | 竖条 | 高 > 宽 × 20 | 侧边色带 / 标题左侧色块 |
+    | 细横线 | 宽 > 高 × 100 且高 ≤ 4 | 章节分隔线 |
+    | 粗横条 | 宽 > 高 × 5 且高 > 20 | 章节标题栏底色 |
+
+    **颜色**取「填这个形状的那个 `rg`」—— 紧挨在 `re` 前面的那个。
+    """
+    out = {}
+
+    # **颜色 + 矩形配对** ——
+    #
+    # **不能靠「rg 后面紧跟 re」的正则** ——
+    # 真实 PDF 里中间隔着路径指令（`q` / `Q` / `n` / `W*`）：
+    #
+    #     .2235 .251 .5176 rg
+    #     q
+    #     153.125 1050 2262.5 100 re
+    #     W* n
+    #
+    # → 改成**按位置配对**：先找出所有 `rg` 的位置和值，
+    # 再对每个 `re` 取**它前面最近的、还没被用过的 `rg`**。
+    colors = [(m.start(), m.group(1), m.group(2), m.group(3))
+              for m in re.finditer(
+                  r"([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+rg", content)]
+    # **矩形 + 它后面的绘制方式** ——
+    #
+    # `re` 后面跟什么决定了这个形状是**填充**还是**裁剪**：
+    # - `f` / `f*` → **真的画出来了**（填充）
+    # - `W` / `W*` → **裁剪路径**（不画）
+    # - `n` → 不画（只结束路径）
+    #
+    # **不区分就会把「裁剪路径」当成色块** ——
+    # 本机踩过：把强调色 #384083 当成标题栏底色 → 白字蓝底 → 字看不见。
+    rects = []
+    for m in re.finditer(
+            r"([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+([-\d.]+)\s+re", content):
+        tail = content[m.end():m.end() + 12]
+        if re.match(r"\s*W", tail):
+            continue          # 裁剪路径 —— 不画
+        if re.match(r"\s*n\b", tail):
+            continue          # 只结束路径 —— 不画
+        rects.append((m.start(), m.group(1), m.group(2), m.group(3), m.group(4)))
+
+    verticals = []
+    hlines = []
+    bands = []
+    ci = 0
+    for (pos, x, y, w, h) in rects:
+        # 找**前面最近的** rg
+        while ci < len(colors) and colors[ci][0] < pos:
+            ci += 1
+        if ci == 0:
+            continue
+        _, r, g, b = colors[ci - 1]
+        try:
+            rv, gv, bv = float(r), float(g), float(b)
+            wf, hf = abs(float(w)), abs(float(h))
+        except ValueError:
+            continue
+        if wf < 0.5 and hf < 0.5:
+            continue
+        color = "#%02x%02x%02x" % (int(rv * 255), int(gv * 255), int(bv * 255))
+        # **纯白不算装饰**
+        if rv > 0.97 and gv > 0.97 and bv > 0.97:
+            continue
+        if hf > wf * 20 and wf <= 40:
+            verticals.append((wf, hf, color))
+        elif wf > hf * 100 and hf <= 4:
+            hlines.append((wf, hf, color))
+        elif wf > hf * 5 and hf > 20:
+            bands.append((wf, hf, color))
+
+    # **竖条** —— 取最细的那根（最像「色带」）
+    if verticals:
+        verticals.sort(key=lambda v: v[0])
+        w, h, color = verticals[0]
+        out["_accent_bar_px"] = round(w * 0.75, 1)   # PDF 单位 → px 近似
+        out["_accent_bar_color"] = color
+
+    # **分隔线** —— 取最常见的高度和颜色
+    if hlines:
+        from collections import Counter
+        hh = Counter(round(h) for _, h, _ in hlines)
+        h = hh.most_common(1)[0][0]
+        cols = Counter(c for _, hh2, c in hlines if round(hh2) == h)
+        out["_divider_px"] = max(1, round(h * 0.75))
+        out["_divider_color"] = cols.most_common(1)[0][0]
+
+    # **标题栏底色** —— 取最宽的那条横条的**浅色**版本
+    if bands:
+        bands.sort(key=lambda b: -b[0])
+        wf, hf, color = bands[0]
+        # 底色通常是**淡**的（接近白）—— 强调色已经单独抽了
+        out["_band_color"] = color
+
+    return out
+
+
+def _pdf_to_css(data):
+    """PDF → CSS（尽力而为，但**尽量把视觉风格抽出来**）。
+
+    ## 之前的问题
+
+    原来只抽**页面尺寸**，配色/字号/字体全丢 →
+    用户看到的模板**跟原文件不像**（"UI 风格设计没有跟着转换过来"）。
+
+    → 现在抽 **强调色 / 正文色 / 字号 / 字体名**（见 `_pdf_style`）。
+
+    ## 仍然做不到的
+
+    **精确的版式还原** —— PDF 只给坐标，不给语义层级。
+    字号只能**按大小映射**到「姓名 / 正文 / 章节标题」——
+    是**近似**，不是像素级还原。
+
+    **抽不出文字的 PDF（扫描件）** 会如实告诉用户，不瞎填。
     """
     p = dict(DEFAULTS)
     p["_extracted"] = []
@@ -297,6 +627,41 @@ def _pdf_to_css(data):
     if size:
         p["page_width_mm"], p["page_height_mm"] = size
         p["_extracted"].append("页面尺寸")
+
+    # **视觉风格** —— 配色 / 字号 / 字体
+    style = _pdf_style(data)
+    if style.get("accent_color"):
+        p["accent_color"] = style["accent_color"]
+        p["_extracted"].append("强调色")
+    if style.get("title_color"):
+        p["title_color"] = style["title_color"]
+    if style.get("name_size_pt"):
+        p["name_size_pt"] = style["name_size_pt"]
+        p["_extracted"].append("字号")
+    if style.get("font_size_pt"):
+        p["font_size_pt"] = style["font_size_pt"]
+    # **几何特征** —— 竖条 / 分隔线 / 横条
+    #
+    # **颜色字段也要一起搬** —— 只搬 px 不搬 color，
+    # CSS 里就会用默认色（竖条变强调色 / 分隔线变 #cccccc）。
+    for key, label in (("_accent_bar_px", "侧边色带"),
+                       ("_accent_bar_color", "侧边色带"),
+                       ("_divider_px", "分隔线"),
+                       ("_divider_color", "分隔线"),
+                       ("_band_color", "标题栏底色")):
+        if style.get(key):
+            p[key] = style[key]
+            if label not in p["_extracted"]:
+                p["_extracted"].append(label)
+    if style.get("_pdf_font_name"):
+        p["_extracted"].append("字体")
+        # **PDF 字体名 → CSS font-family** ——
+        # `SimSun`/`MicrosoftYaHei`/`SimHei` 这些能直接用；
+        # 认不出来的（`ABCDEF+xxx`）不要瞎猜。
+        fam = style["_pdf_font_name"]
+        css_fam = _pdf_font_to_css(fam)
+        if css_fam:
+            p["font_family"] = '"%s", %s' % (css_fam, p["font_family"])
 
     text, note = _pdf_text(data)
     if not text.strip():
@@ -306,7 +671,7 @@ def _pdf_to_css(data):
         p["_extracted"].append("文本内容")
 
     lines = [
-        "/* 从 PDF 抽取的版式（PDF 没有样式表，只能还原到这个程度） */",
+        "/* 从 PDF 抽取的版式（PDF 没有样式表 —— 配色/字号按内容流近似还原） */",
         "body { font-family: %s; font-size: %spx; line-height: %s; }"
         % (p["font_family"], _pt_to_px(p["font_size_pt"]), p["line_height"]),
         "@page { size: %smm %smm; margin: %smm %smm %smm %smm; }"
@@ -316,7 +681,44 @@ def _pdf_to_css(data):
         ".page { width: %smm; min-height: %smm; }"
         % (_num(p["page_width_mm"] - p["margin_left_mm"] - p["margin_right_mm"]),
            _num(p["page_height_mm"] - p["margin_top_mm"] - p["margin_bottom_mm"])),
+        # **抽到的风格要真的作用到元素上** ——
+        # 否则抽了也白抽（页面上还是默认蓝）。
+        ".name { color: %s; font-size: %spx; }"
+        % (p["accent_color"], _pt_to_px(p["name_size_pt"])),
+        ".sec-title { color: %s; }" % p["accent_color"],
+        ".item-title { color: %s; }" % p["title_color"],
+        ".tag { border-color: %s; }" % p["accent_color"],
     ]
+
+    # ── 几何特征 → CSS ──
+    #
+    # **竖条**（侧边色带）：贴在抬头左边
+    if p.get("_accent_bar_px"):
+        lines.append(
+            ".head { border-left: %spx solid %s; padding-left: 10px; }"
+            % (_num(p["_accent_bar_px"]), p.get("_accent_bar_color")
+               or p["accent_color"]))
+    # **细横线**（章节分隔线）
+    if p.get("_divider_px"):
+        lines.append(
+            ".sec-title { border-bottom: %spx solid %s; padding-bottom: 3px; }"
+            % (_num(p["_divider_px"]), p.get("_divider_color") or "#cccccc"))
+    # **横条**（章节标题栏底色）
+    #
+    # **底色和文字色可能撞色** ——
+    # 原设计常常是「深色底 + 白字」，但我们把标题文字也设成了强调色
+    # → **深蓝底 + 深蓝字 = 字看不见**。
+    #
+    # → 底色**接近强调色**时，文字反过来用白色。
+    band = p.get("_band_color")
+    if band:
+        title_color = p["accent_color"]
+        if _color_close(band, p["accent_color"]):
+            title_color = "#ffffff"
+        lines.append(
+            ".sec-title { background: %s; color: %s; padding: 3px 6px; }"
+            % (band, title_color))
+
     return "\n".join(lines) + "\n", p
 
 
