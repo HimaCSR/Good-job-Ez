@@ -65,6 +65,26 @@ class TestCityCodes(unittest.TestCase):
         self.assertEqual(code_for("桂林"), "3165")
         self.assertEqual(code_for("重庆"), "551")
         self.assertEqual(code_for("广州"), "763")
+        self.assertEqual(code_for("成都"), "552")
+
+    def test_chengdu_code_verified(self):
+        """**成都 = 552**（2026-10-29 实测）。
+
+        老文档「猜错的码」那节就写着「合肥 552 → 成都」——
+        552 一直是成都，只是码表里漏了。实测确认：
+        552 抓到 20 条，主城市成都，**其余是四川周边**
+        （眉山/德阳/泸州/广元/雅安）—— 智联**区域码**的特性。
+        """
+        self.assertEqual(CITY_CODES.get("成都"), "552")
+
+    def test_code_table_and_unverified_do_not_overlap(self):
+        """**码表和「猜错过的」列表不能有交集**。
+
+        同一个城市名同时在两边 → 说明它既被验证过又被标记为不可信。
+        """
+        overlap = set(CITY_CODES) & set(UNVERIFIED_CITIES)
+        self.assertEqual(overlap, set(),
+                         "这些城市既在码表里又在未验证列表里：%s" % overlap)
 
     def test_code_for_with_suffix(self):
         """「广西南宁」「杭州市」这种带后缀的也能认。"""
