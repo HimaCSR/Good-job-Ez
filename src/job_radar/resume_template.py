@@ -15,6 +15,7 @@
 """
 
 import os
+import re
 
 # 模板目录 —— **放 plugin-data，不放插件目录**。
 #
@@ -384,6 +385,383 @@ def uploaded_bg_image(template_id):
     return "data:%s;base64,%s" % (mime, base64.b64encode(raw).decode("ascii"))
 
 
+def _uploaded_skeleton(template_id):
+    """读上传模板的**骨架 HTML**；没有返回 None。
+
+    骨架是「模板自己的 HTML 结构」——
+    章节标题、页眉布局、字段位置全来自模板文件。
+    """
+    if not template_id or template_id.startswith("classic"):
+        return None
+    path = os.path.join(TEMPLATES_DIR, template_id + ".skeleton.html")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return None
+
+
+# ── 模板章节 ↔ 用户内容的语义对齐 ──────────────────────────────────────────
+#
+# **为什么要对齐**
+#
+# 模板的章节（来自模板文件）：
+#     求职意向 / 自我评价 / 工作经历 / 教育经历
+# 用户数据的章节（来自 profile + 岗位 JD）：
+#     个人简介 / 专业技能 / 工作经历 / 项目经历 / 教育背景
+#
+# **标题要用模板的**（否则跟原文件不像），
+# **内容要用用户的**（否则就是模板的示例内容）。
+#
+# ## 匹配规则
+#
+# 1. **标题完全相同** → 直接对上
+# 2. **同一「语义类」** → 对上
+#    - entry 类：工作经历 / 工作经验 / 实习经历 / 项目经历 / 教育背景 / 教育经历
+#    - list 类：自我评价 / 个人评价 / 个人优势
+#    - tags 类：专业技能 / 技能 / 技能特长
+#    - paragraph 类：求职意向 / 个人信息 / 个人简介
+# 3. 对不上 → **留空**（模板里那个章节显示为空）
+
+# 语义类
+_CLASS_BY_TITLE = {
+    # **paragraph 只有「求职意向/个人信息」** ——
+    # 「个人简介」归 list（跟自我评价同类）。
+    #
+    # 本机踩过：个人简介归 paragraph → 模板的「求职意向」(paragraph)
+    # 抢走了个人简介 → 而「自我评价」(list) 空着 →
+    # 章节内容全错位。
+    "求职意向": "paragraph", "个人信息": "paragraph",
+    "自我评价": "list", "个人评价": "list", "个人优势": "list",
+    "个人简介": "list", "自我介绍": "list",
+    "专业技能": "tags", "技能": "tags", "技能特长": "tags",
+    "工作经历": "entry", "工作经验": "entry", "实习经历": "entry",
+    "项目经历": "entry", "项目经验": "entry",
+    "教育背景": "entry", "教育经历": "entry",
+}
+
+
+# 标题里出现的关键词 → 该章节想要的「内容特征」
+#
+# **为什么要打分而不是「同类型第一个抢」**
+#
+# 模板有 4 个 entry 类章节（工作经历/项目经历/教育经历/实习经历），
+# 用户数据也有 4 个 entry 类章节 —— **光看类型分不出来**。
+#
+# 本机踩过：按类型贪心 → 「教育经历」抢到了「工作经历」的内容 →
+# 简历里「教育经历」下写着公司名，「自我评价」空着。
+#
+# → **按关键词相似度打分**，全局最优分配。
+
+_TITLE_KEYWORDS = {
+    "工作经历": ("工作", "公司", "岗位", "职责", "在职"),
+    "工作经验": ("工作", "公司", "岗位", "职责", "在职"),
+    "实习经历": ("实习", "公司", "岗位"),
+    "项目经历": ("项目",),
+    "项目经验": ("项目",),
+    "教育背景": ("学校", "大学", "学院", "学历", "毕业"),
+    "教育经历": ("学校", "大学", "学院", "学历", "毕业"),
+    "求职意向": ("意向", "岗位", "城市", "薪资"),
+    "个人信息": ("电话", "邮箱", "地址"),
+    "自我评价": ("评价", "优势", "特长", "能力"),
+    "个人评价": ("评价", "优势", "特长", "能力"),
+    "个人优势": ("优势", "特长", "能力"),
+    "个人简介": ("简介", "介绍", "概述"),
+    "专业技能": ("技能", "工具", "掌握"),
+    "技能": ("技能", "工具", "掌握"),
+    "技能特长": ("技能", "特长"),
+}
+
+# 标题同义词 —— 「教育背景」=「教育经历」
+#
+# **必须有这张表** —— 模板叫「教育经历」，数据叫「教育背景」，
+# 字面不同但**是同一个东西**。
+#
+# 本机踩过：没有同义词表 → 「教育经历 vs 教育背景」只有 13 分
+# → 被「专业技能」以 25 分抢走（"专业"二字误命中）→
+# 教育章节里塞了技能，工作经历塞了教育。
+_SYNONYMS = [
+    {"教育背景", "教育经历", "教育情况", "学历信息"},
+    {"工作经历", "工作经验", "工作履历", "职业经历"},
+    {"实习经历", "实习经验", "实习情况"},
+    {"项目经历", "项目经验", "项目情况"},
+    {"自我评价", "个人评价", "个人优势", "自我描述", "个人简介", "自我介绍"},
+    {"专业技能", "技能", "技能特长", "专业能力", "技术能力"},
+    {"求职意向", "求职目标", "职位意向", "意向岗位"},
+    {"个人信息", "基本信息", "联系方式"},
+]
+
+
+def _is_synonym(a, b):
+    """两个标题是不是同义。"""
+    if a == b:
+        return True
+    for group in _SYNONYMS:
+        if a in group and b in group:
+            return True
+    return False
+
+
+def _section_text(sec):
+    """章节的全部文字（用来判特征）。"""
+    parts = []
+    for p in (sec.get("paragraphs") or []):
+        parts.append(str(p))
+    for b in (sec.get("bullets") or []):
+        parts.append(str(b.get("text", "")))
+    for e in (sec.get("entries") or []):
+        parts.append(str(e.get("title", "")))
+        parts.append(str(e.get("subtitle", "")))
+    for t in (sec.get("tags") or []):
+        parts.append(str(t))
+    return " ".join(parts)
+
+
+def _match_score(tpl_title, sec):
+    """模板章节 ↔ 用户章节 的匹配分（越高越合适）。
+
+    ## 打分项
+
+    1. **标题完全相同** → 100（直接对上）
+    2. **关键词命中** —— 模板标题要的词在内容里出现 → 每个 +10
+    3. **同类**（list/entry/tags/paragraph）→ +3
+    4. **不同类** → 0
+    """
+    src_title = sec.get("title") or ""
+    if src_title == tpl_title:
+        return 100.0
+    # **同义词** —— 「教育背景」vs「教育经历」= 90
+    # （同义但不完全一样，留 10 分差距给完全相同的）
+    if _is_synonym(tpl_title, src_title):
+        return 90.0
+    text = _section_text(sec)
+    score = 0.0
+    for kw in _TITLE_KEYWORDS.get(tpl_title, ()):
+        if kw in src_title:
+            score += 25        # 标题里就有 → 强信号
+        elif kw in text:
+            score += 10        # 内容里提到 → 弱信号
+    tpl_cls = _CLASS_BY_TITLE.get(tpl_title)
+    src_cls = _CLASS_BY_TITLE.get(src_title, sec.get("kind"))
+    if tpl_cls and src_cls and tpl_cls == src_cls:
+        score += 3
+    return score
+
+
+def _align_to_skeleton(sections, skeleton_spec, identity=None):
+    """把用户数据的 sections 对齐到**模板的章节列表**。
+
+    skeleton_spec: 模板的槽位规格（含 sections）。
+    返回的每个 section 的 title 是**模板的标题**。
+
+    ## 分配策略
+
+    **全局最优贪心**：对每个（模板章节, 用户章节）组合打分，
+    反复取分数最高的组合，已分配的跳过。
+
+    → 比「同类第一个抢」准得多。
+    本机踩过：同类贪心 → 「教育经历」抢到工作经历的内容。
+    """
+    spec_sections = (skeleton_spec or {}).get("sections") or []
+    if not spec_sections:
+        return _sections_for_skeleton(sections)
+
+    # ── 「求职意向」这类章节从 identity 填 ──
+    #
+    # 模板的页眉字段（意向城市/期望薪资/求职类型）本来就来自 identity，
+    # **不该从 sections 里找** —— 数据里没有对应章节。
+    #
+    # 不做这步 → 「求职意向」章节空白（本机踩过）。
+    _INTENT_KEYS = {
+        "求职意向": ("headline", "location", "salary", "job_type"),
+        "个人信息": ("phone", "email", "location"),
+    }
+
+    # 所有组合打分
+    pairs = []
+    for ti, tpl_sec in enumerate(spec_sections):
+        tpl_title = tpl_sec.get("title") or ""
+        for si, sec in enumerate(sections):
+            pairs.append((_match_score(tpl_title, sec), ti, si))
+    pairs.sort(key=lambda x: -x[0])
+
+    assign = {}
+    used_src = set()
+    for score, ti, si in pairs:
+        if score <= 0:
+            break
+        if ti in assign or si in used_src:
+            continue
+        assign[ti] = si
+        used_src.add(si)
+
+    out = []
+    for ti, tpl_sec in enumerate(spec_sections):
+        tpl_title = tpl_sec.get("title") or ""
+        tpl_kind = tpl_sec.get("kind") or "paragraph"
+        item = {"title": tpl_title, "kind": tpl_kind}
+
+        si = assign.get(ti)
+        if si is None:
+            # ── 特殊章节：从 identity 填 ──
+            intent = _INTENT_KEYS.get(tpl_title)
+            if intent:
+                bits = []
+                for k in intent:
+                    v = (identity or {}).get(k)
+                    if v:
+                        bits.append(str(v))
+                if bits:
+                    item["paragraphs"] = ["  |  ".join(bits)]
+            else:
+                item["paragraphs"] = []
+                item["bullets"] = []
+                item["entries"] = []
+                item["tags"] = []
+            out.append(item)
+            continue
+
+        sec = sections[si]
+        # **内容形态看「源」里实际有什么** ——
+        # 不能只看 kind 名字。
+        #
+        # 本机踩过：源章节是 `kind="text"`（有 paragraphs），
+        # 模板章节是 `kind="list"`（要 bullets）→
+        # 按 kind 名字取 → bullets 空了 → 「自我评价」章节空白。
+        #
+        # → 按**实际有哪些键**来取，缺了就从别的形态转。
+        if sec.get("tags"):
+            src_shape = "tags"
+        elif sec.get("bullets"):
+            src_shape = "list"
+        elif sec.get("entries"):
+            src_shape = "entry"
+        else:
+            src_shape = "paragraph"
+
+        item.update(_convert_shape(sec, src_shape, tpl_kind))
+        out.append(item)
+    return out
+
+
+def _convert_shape(sec, src_shape, tpl_kind):
+    """把源章节的内容转成模板要的形态。
+
+    ## 为什么必须转
+
+    **模板的 kind 和数据的 kind 不一定一样** ——
+    稻壳儿模板的「工作经历」被判成 `list`（因为下面有「1. 2. 3.」编号），
+    而数据里是 `entry`（公司+日期+要点）。
+
+    不转 → 模板要 bullets，数据只有 entries → **章节空白**。
+
+    本机踩过：「工作经历」章节空着。
+
+    ## 转换表
+
+    | 源 → 目标 | 怎么转 |
+    | --- | --- |
+    | entry → list | 每个条目的标题 + 要点各成一条 |
+    | entry → paragraph | 标题 + 要点拼成段落 |
+    | list → entry | 整段当作一个条目的正文 |
+    | paragraph → list | 每个段落一条 |
+    | paragraph → entry | 整段当作一个条目 |
+    | tags → list | 每个标签一条 |
+    | tags → paragraph | 标签用「、」连接 |
+    | 任意 → tags | 抽文本里的短词 |
+    """
+    out = {"paragraphs": [], "bullets": [], "entries": [], "tags": []}
+
+    def _texts():
+        if src_shape == "tags":
+            return list(sec.get("tags") or [])
+        if src_shape == "list":
+            return [b.get("text", "") for b in (sec.get("bullets") or [])]
+        if src_shape == "entry":
+            res = []
+            for e in (sec.get("entries") or []):
+                res.append(e.get("title", ""))
+                for b in (e.get("bullets") or []):
+                    res.append(b.get("text", ""))
+            return res
+        return list(sec.get("paragraphs") or [])
+
+    if tpl_kind == "tags":
+        if src_shape == "tags":
+            out["tags"] = list(sec.get("tags") or [])
+        else:
+            # 从文本里抽「短词」当标签
+            tags = []
+            for t in _texts():
+                for part in re.split(r"[、,，/\s]+", t):
+                    part = part.strip()
+                    if 1 < len(part) <= 12:
+                        tags.append(part)
+            out["tags"] = tags[:24]
+    elif tpl_kind == "list":
+        if src_shape == "list":
+            out["bullets"] = list(sec.get("bullets") or [])
+        else:
+            out["bullets"] = [{"text": t, "basis": ""}
+                              for t in _texts() if t]
+    elif tpl_kind == "entry":
+        if src_shape == "entry":
+            out["entries"] = list(sec.get("entries") or [])
+        else:
+            texts = [t for t in _texts() if t]
+            if texts:
+                out["entries"] = [{
+                    "title": texts[0],
+                    "meta": "",
+                    "subtitle": "",
+                    "bullets": [{"text": t, "basis": ""} for t in texts[1:]],
+                }]
+    else:
+        if src_shape == "paragraph":
+            out["paragraphs"] = list(sec.get("paragraphs") or [])
+        elif src_shape == "tags":
+            out["paragraphs"] = ["、".join(sec.get("tags") or [])]
+        else:
+            out["paragraphs"] = [t for t in _texts() if t]
+    return out
+
+
+def _uploaded_spec(template_id):
+    """读上传模板的槽位规格（JSON）；没有返回 None。"""
+    if not template_id:
+        return None
+    path = os.path.join(TEMPLATES_DIR, template_id + ".spec.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        import json
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def _sections_for_skeleton(sections):
+    """把内置骨架的 sections 形态 → 骨架要的形态（无模板规格时的兜底）。"""
+    out = []
+    for sec in sections:
+        title = sec.get("title") or ""
+        kind = _CLASS_BY_TITLE.get(title, sec.get("kind") or "paragraph")
+        item = {"title": title, "kind": kind}
+        if kind == "tags":
+            item["tags"] = sec.get("tags") or []
+        elif kind == "list":
+            item["bullets"] = sec.get("bullets") or []
+        elif kind == "entry":
+            item["entries"] = sec.get("entries") or []
+        else:
+            item["paragraphs"] = sec.get("paragraphs") or []
+        out.append(item)
+    return out
+
+
 def render_html(template_id, context, css_override=None, photo=None):
     """渲染一份简历 HTML。
 
@@ -415,6 +793,16 @@ def render_html(template_id, context, css_override=None, photo=None):
     if css is None:
         raise FileNotFoundError("模板不存在: %s" % template_id)
 
+    # ── 骨架选择 ──
+    #
+    # **上传的 PDF 模板有自己的骨架**（章节结构从模板来）。
+    # 有骨架 → 用骨架（内容按模板的槽位填）。
+    # 没骨架 → 用内置骨架（CSS 换色）。
+    #
+    # 用户：「现在有样式了，但与我提供的模板文件完全不同。」
+    # → 差别就在这儿：**结构** vs **颜色**。
+    skeleton = _uploaded_skeleton(template_id)
+
     ctx = dict(context)
     ctx["style"] = css
     ctx.setdefault("show_basis", False)
@@ -426,6 +814,15 @@ def render_html(template_id, context, css_override=None, photo=None):
     if photo is None:
         photo = _current_photo()
     ctx["photo"] = photo
+
+    if skeleton:
+        # **骨架自带样式** —— 不再套 `{{ style }}`，
+        # 骨架里的 CSS 已经包含了从 PDF 抽出来的配色/版面。
+        ctx["style"] = ""
+        spec = _uploaded_spec(template_id)
+        ctx["sections"] = _align_to_skeleton(
+            ctx.get("sections") or [], spec, ctx.get("identity") or {})
+        return Template(skeleton).render(**ctx)
     return Template(_SKELETON).render(**ctx)
 
 

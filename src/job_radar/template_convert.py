@@ -477,6 +477,224 @@ def _hex(rgb):
                                int(max(0.0, min(1.0, rgb[1])) * 255),
                                int(max(0.0, min(1.0, rgb[2])) * 255))
 
+# ── PDF 文字定位 ────────────────────────────────────────────────────────────
+#
+# **为什么需要**
+#
+# 用户：「你是不是做不到简历模板识别生成对应的 html，
+# 然后简历优化时根据个人信息填入相应的内容？」
+#
+# 答：以前做不到 —— 因为只抽了颜色，没有「文字在哪」。
+# 现在要抽**带坐标的文字块**，才能：
+#   1. 还原模板自己的版面（不是内置骨架）
+#   2. 认出「哪段是姓名槽」「哪段是章节标题」
+#
+# ## PDF 里怎么定位
+#
+# ```
+# BT                        ← 开始文本块
+#   /F4 14 Tf               ← 字体 + 字号
+#   1 0 0 -1 59 398 Tm      ← 定位矩阵（x=59, y=398）
+#   <06DE0567...> Tj        ← 输出文字
+# ET                        ← 结束
+# ```
+#
+# `Tm` 的最后一个数是 y（PDF 坐标**向上**）；
+# 很多模板用 `1 0 0 -1` 翻转（`Tm` 变成 top-left 坐标，y 向下）。
+
+def _pdf_tounicode(data):
+    """解析所有 ToUnicode CMap → {CID: 字符}。
+
+    ## 为什么必须要
+
+    中文 PDF 里文字是 **CID 编码**（`<06DE0567...>`）——
+    直接读是乱码，**只有 ToUnicode 表能还原**。
+
+    本机踩过：不解析 ToUnicode → 抽出来的全是乱码 →
+    以为「PDF 抽不出文字」。
+    """
+    import zlib
+    cmap = {}
+    for m in re.finditer(rb"/ToUnicode\s+(\d+)\s+0\s+R", data):
+        num = int(m.group(1))
+        om = re.search((r"(?<![0-9])" + str(num) + r"\s+0\s+obj").encode(), data)
+        if not om:
+            continue
+        end = data.find(b"endobj", om.end())
+        seg = data[om.end():end if end > 0 else len(data)]
+        sm = re.search(rb"stream\r?\n", seg)
+        if not sm:
+            continue
+        blob = seg[sm.end():]
+        if b"endstream" in blob:
+            blob = blob[:blob.find(b"endstream")]
+        try:
+            txt = zlib.decompress(blob).decode("latin-1", errors="replace")
+        except Exception:
+            txt = blob.decode("latin-1", errors="replace")
+        # bfchar —— 一对一
+        for bf in re.finditer(r"beginbfchar(.*?)endbfchar", txt, re.S):
+            for pair in re.finditer(
+                    r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>", bf.group(1)):
+                try:
+                    cid = int(pair.group(1), 16)
+                    dst = pair.group(2)
+                    cmap[cid] = "".join(
+                        chr(int(dst[i:i + 4], 16)) for i in range(0, len(dst), 4))
+                except ValueError:
+                    continue
+        # bfrange —— 连续区间
+        for br in re.finditer(r"beginbfrange(.*?)endbfrange", txt, re.S):
+            for tri in re.finditer(
+                    r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>",
+                    br.group(1)):
+                try:
+                    lo = int(tri.group(1), 16)
+                    hi = int(tri.group(2), 16)
+                    base = int(tri.group(3), 16)
+                except ValueError:
+                    continue
+                if hi < lo or hi - lo > 65535:
+                    continue
+                for k in range(lo, hi + 1):
+                    cmap[k] = chr(base + (k - lo))
+    return cmap
+
+
+def _pdf_decode_hex(hexstr, cmap):
+    """`<06DE0567...>` → 文字。
+
+    字节数是偶数；每 2 字节是一个 CID（常见中文子集）。
+    """
+    try:
+        raw = bytes.fromhex(hexstr)
+    except ValueError:
+        return ""
+    if not cmap:
+        # 没有映射表 —— 当 latin-1 读（英文 PDF 能读出来）
+        return raw.decode("latin-1", errors="replace")
+    out = []
+    for i in range(0, len(raw) - 1, 2):
+        cid = (raw[i] << 8) | raw[i + 1]
+        out.append(cmap.get(cid, ""))
+    return "".join(out)
+
+
+def _pdf_text_items(data):
+    """抽出**带坐标的文字块**。
+
+    返回 [{text, x, y, size, color, font}]，坐标是 PDF 用户坐标（y 向上）。
+
+    ## 跟 `_pdf_text` 的区别
+
+    `_pdf_text` 只把文字**堆成一坨** → 不知道谁在哪 → 没法还原版面。
+
+    ## 关键：CID 解码
+
+    中文的 `Tj` 内容是 `<hex>` 形式 → 必须过 ToUnicode 表。
+    """
+    cmap = _pdf_tounicode(data)
+    texts, _raws = _pdf_streams(data)
+    content = ""
+    for t in texts:
+        if re.search(r"/\S+\s+[\d.]+\s+Tf", t) and ("Tj" in t or "TJ" in t):
+            content = t
+            break
+    if not content:
+        return []
+
+    items = []
+    # 文本块状态
+    size = 12.0
+    font = ""
+    color = (0.0, 0.0, 0.0)
+    # 当前变换矩阵 + 文本矩阵
+    ctm = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    stack = []
+    tm = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+    tlm = tm
+    leading = 0.0
+
+    for m in re.finditer(
+            r"(?P<q>\bq\b)"
+            r"|(?P<Q>\bQ\b)"
+            r"|(?P<cm>(?P<ma>[-\d.]+)\s+(?P<mb>[-\d.]+)\s+(?P<mc>[-\d.]+)\s+"
+            r"(?P<md>[-\d.]+)\s+(?P<me>[-\d.]+)\s+(?P<mf>[-\d.]+)\s+cm)"
+            r"|(?P<rg>(?P<cr>[-\d.]+)\s+(?P<cg>[-\d.]+)\s+(?P<cb2>[-\d.]+)\s+rg)"
+            r"|(?P<Tf>/(?P<fname>[\w+\-.]+)\s+(?P<fsize>[\d.]+)\s+Tf)"
+            r"|(?P<TL>(?P<lead>[-\d.]+)\s+TL)"
+            r"|(?P<Tm>(?P<ma2>[-\d.]+)\s+(?P<mb2>[-\d.]+)\s+(?P<mc2>[-\d.]+)\s+"
+            r"(?P<md2>[-\d.]+)\s+(?P<me2>[-\d.]+)\s+(?P<mf2>[-\d.]+)\s+Tm)"
+            r"|(?P<Td>(?P<tx>[-\d.]+)\s+(?P<ty>[-\d.]+)\s+Td)"
+            r"|(?P<Tj>\((?P<lit>(?:[^()\\]|\\.)*)\)\s*Tj)"
+            r"|(?P<TJhex><(?P<hex>[0-9A-Fa-f\s]+)>\s*Tj)"
+            r"|(?P<TJarr>\[(?P<arr>[^\]]*)\]\s*TJ)",
+            content):
+        if m.group("q"):
+            stack.append(ctm)
+        elif m.group("Q"):
+            if stack:
+                ctm = stack.pop()
+        elif m.group("cm"):
+            ctm = _mat_mul(
+                (float(m.group("ma")), float(m.group("mb")),
+                 float(m.group("mc")), float(m.group("md")),
+                 float(m.group("me")), float(m.group("mf"))), ctm)
+        elif m.group("rg"):
+            color = (float(m.group("cr")), float(m.group("cg")),
+                     float(m.group("cb2")))
+        elif m.group("Tf"):
+            font = m.group("fname")
+            size = float(m.group("fsize"))
+        elif m.group("TL"):
+            leading = float(m.group("lead"))
+        elif m.group("Tm"):
+            tm = (float(m.group("ma2")), float(m.group("mb2")),
+                  float(m.group("mc2")), float(m.group("md2")),
+                  float(m.group("me2")), float(m.group("mf2")))
+            tlm = tm
+        elif m.group("Td"):
+            tx = float(m.group("tx"))
+            ty = float(m.group("ty"))
+            tlm = _mat_mul((1.0, 0.0, 0.0, 1.0, tx, ty), tlm)
+            tm = tlm
+        elif m.group("Tj"):
+            txt = _pdf_unescape(m.group("lit"))
+            if txt.strip():
+                items.append(_make_item(txt, tm, ctm, size, color, font))
+        elif m.group("TJhex"):
+            txt = _pdf_decode_hex(re.sub(r"\s", "", m.group("hex")), cmap)
+            if txt.strip():
+                items.append(_make_item(txt, tm, ctm, size, color, font))
+        elif m.group("TJarr"):
+            parts = []
+            for hm in re.finditer(r"<([0-9A-Fa-f\s]+)>", m.group("arr")):
+                parts.append(_pdf_decode_hex(re.sub(r"\s", "", hm.group(1)), cmap))
+            for lm in re.finditer(r"\((?P<lit>(?:[^()\\]|\\.)*)\)",
+                                  m.group("arr")):
+                parts.append(_pdf_unescape(lm.group("lit")))
+            txt = "".join(parts)
+            if txt.strip():
+                items.append(_make_item(txt, tm, ctm, size, color, font))
+    return items
+
+
+def _make_item(text, tm, ctm, size, color, font):
+    """文字块 → dict（坐标换算到页面空间）。"""
+    # 文本矩阵 × 当前变换矩阵
+    full = _mat_mul(tm, ctm)
+    x, y = _mat_apply(full, 0.0, 0.0)
+    # 字号也要跟缩放走
+    scale = abs(full[0]) if abs(full[0]) > 0.01 else 1.0
+    return {
+        "text": text,
+        "x": round(x, 2),
+        "y": round(y, 2),
+        "size": round(size * scale, 2),
+        "color": _hex(color),
+        "font": font,
+    }
+
 def _pdf_page_size(data):
     """从 PDF 抽页面尺寸（点，1pt = 1/72 英寸）。
 
@@ -1010,6 +1228,63 @@ def _pdf_layout_css(lay, page_h_mm):
     return lines
 
 
+
+# ── 槽位推断 ────────────────────────────────────────────────────────────────
+#
+# **用户选了「半自动」** —— 解析出骨架后由人在预览里点选槽位。
+# 但**初始猜测**仍然要有 —— 全是空槽的话预览没法看。
+#
+# ## 推断依据
+#
+# | 线索 | 判据 |
+# | --- | --- |
+# | **最大字号** | 姓名（模板里最大号的那块） |
+# | **页眉区**（顶部 25%） | 姓名 / 联系方式 / 照片 |
+# | **「XX：」开头** | 联系方式（电话/邮箱/性别/年龄…） |
+# | **字号第二档** | 章节标题 |
+# | **白字 + 有底色块** | 章节标题（深底反白） |
+# | **正文色 + 最长** | 段落正文 |
+
+# 常见的「字段名」—— 出现在「XX：」里就当成联系方式项
+_FIELD_WORDS = [
+    "电话", "手机", "联系电话", "邮箱", "邮件", "微信", "性别", "年龄", "生日",
+    "城市", "城市", "地点", "籍贯", "学历", "学校", "毕业院校", "专业",
+    "求职意向", "意向岗位", "意向城市", "期望薪资", "求职类型", "当前状态",
+    "当前状愿", "身份", "籍贯", "政治面貌", "婚姻状况",
+]
+
+
+def _guess_slots(items, page_h):
+    """文字块 → 初步槽位猜测。
+
+    返回 [{...item, "role": "name"/"field"/"section"/"body"/"entry"}]
+    """
+    if not items:
+        return []
+    sizes = sorted({i["size"] for i in items}, reverse=True)
+    if not sizes:
+        return []
+    big = sizes[0]
+    # **第二大字号** —— 章节标题通常比正文大，但比姓名小
+    sec_size = next((s for s in sizes[1:] if s >= big * 0.6), None)
+
+    out = []
+    for it in items:
+        role = "body"
+        txt = it["text"].strip()
+        top_zone = it["y"] > page_h * 0.75      # 顶部 25%
+
+        if it["size"] >= big * 0.98 and it["size"] == big:
+            role = "name"
+        elif any(txt.startswith(w) or w in txt[:6]
+                 for w in _FIELD_WORDS) and len(txt) < 30:
+            role = "field"
+        elif sec_size and it["size"] >= sec_size * 0.95 and len(txt) < 20:
+            role = "section"
+        elif top_zone and it["size"] >= (sec_size or big) * 0.9:
+            role = "field"
+        out.append(dict(it, role=role))
+    return out
 
 def _pdf_to_css(data):
     """PDF → CSS（尽力而为，但**尽量把视觉风格抽出来**）。

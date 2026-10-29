@@ -125,6 +125,55 @@ def save_upload(filename, data_base64, kind=None, name=None,
     except OSError as e:
         return {"ok": False, "error": "写模板文件失败：%s" % e}
 
+    # ── 骨架规格 + 骨架 HTML ──
+    #
+    # **为什么不只存 CSS** ——
+    # 存 CSS 只能换颜色，HTML 结构还是内置那套。
+    # 用户：「现在有样式了，但与我提供的模板文件完全不同。」
+    #
+    # → 存**模板自己的骨架**（章节结构 + 槽位），
+    # 渲染时按骨架填内容 —— 章节标题用模板的，内容用用户的。
+    spec = None
+    skeleton = ""
+    if ext == "pdf":
+        try:
+            import template_slots
+            spec, _note = template_slots.extract_slots(raw, "pdf")
+            if spec:
+                import template_convert as _tc
+                _css, _params = _tc._pdf_to_css(raw)
+                style = {
+                    "font_family": _params.get("font_family"),
+                    "text_color": "#333333",
+                    "page_width_mm": _params.get("page_width_mm"),
+                    "page_height_mm": _params.get("page_height_mm"),
+                    "accent_color": _params.get("accent_color"),
+                    "title_color": _params.get("title_color"),
+                    "extra_css": _css,
+                }
+                skeleton = template_slots.build_slot_html(spec, style)
+        except Exception as e:      # noqa: BLE001
+            # **骨架抽取失败不能影响模板落盘** ——
+            # 至少还能当「只有 CSS 的模板」用。
+            spec = None
+            skeleton = ""
+
+    if spec:
+        import json
+        spec_path = os.path.join(templates_dir, tid + ".spec.json")
+        try:
+            with open(spec_path, "w", encoding="utf-8", newline="\n") as fh:
+                json.dump(spec, fh, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+    if skeleton:
+        sk_path = os.path.join(templates_dir, tid + ".skeleton.html")
+        try:
+            with open(sk_path, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(skeleton)
+        except OSError:
+            pass
+
     # 图片模板：底图单独存一份（渲染时转成 data URI）
     if ext in ("png", "jpg", "jpeg", "webp") and raw:
         bg_path = os.path.join(templates_dir, tid + ".bg")
