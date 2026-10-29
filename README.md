@@ -167,11 +167,12 @@ hermes plugins doctor ~/.hermes/plugins/job-radar --ci
 
 | 键 | 默认 | 说明 |
 | --- | --- | --- |
-| `keywords` | `[]` | 搜索关键词列表 |
-| `city` | `653` | 智联城市代码。653=杭州 538=上海 530=北京 489=全国 |
+| `keywords` | `[]` | 搜索关键词列表。**空 = 抓不到任何东西** |
+| `city` | `653` | 智联城市代码（单个）。653=杭州 538=上海 530=北京 489=全国 |
+| `cities` | `[]` | 要抓的**城市名**列表（如 `["重庆", "广州"]`）。**填名字不填码** —— 码由插件内部翻译 |
 | `boss_city` | `101210100` | BOSS 城市代码。101210100=杭州 |
-| `min_score` | `60` | 日报/推送的入选分数线 0-100 |
-| `max_jobs_per_run` | `40` | 单次运行最多抓多少条 |
+| `min_score` | `50` | 日报/推送的入选分数线 0-100 |
+| `max_jobs_per_run` | `30` | 单次运行最多抓多少条 |
 | `sites` | `["zhaopin"]` | 启用哪些站：`zhaopin` / `boss` |
 | `request_gap_seconds` | `12` | 两次请求的基准间隔（秒），实际会加 0~20 秒随机 |
 
@@ -186,6 +187,22 @@ hermes plugins doctor ~/.hermes/plugins/job-radar --ci
 | 上海 | 538 | 101020100 |
 | 杭州 | 653 | 101210100 |
 | 深圳 | 765 | 101280600 |
+
+**智联的 `--city` 只认一个码** —— 写 `"551,763"` 会**静默退化成全国**
+（返回北京/保定/上海，完全没限定城市）。所以插件是**逐个城市抓**的，
+配置里用 `cities`（城市名列表）。
+
+**城市码不能靠记忆** —— 本项目按记忆填过 60 个码，
+实测 **28 个是错的**（成都 599 实际是沈阳、西安 566 实际是唐山…）。
+错码不报错、不警告，只是静默抓到别的城市。
+
+已实测通过的 36 个在 [`docs/智联城市码表.md`](docs/智联城市码表.md)，
+加新城市用：
+
+```bash
+bash scripts/find_city_code.sh 成都      # 扫出码
+bash scripts/verify-city-codes.sh         # 校验码表
+```
 
 ---
 
@@ -241,7 +258,7 @@ hermes cron run <job_id>
 ## 开发
 
 ```bash
-# 跑测试（100 个用例，不需要装任何依赖）
+# 跑测试（313 个用例，不需要装任何依赖）
 cd src/job_radar && python -m unittest discover -s tests
 
 # 或者用脚本：测试 + 脱敏扫描 + 仓库卫生，一步到位
@@ -249,7 +266,14 @@ bash scripts/dev.sh check
 
 # 看当前抓取层状态
 cat docs/抓取层现状.md
+
+# 端到端验证（真打招聘网站，用临时目录，不碰你的数据）
+bash scripts/verify_new_user.sh     # 新用户全流程
+bash scripts/verify-city-codes.sh    # 城市码表校验
 ```
+
+**新开对话继续开发**：先读 [`docs/新对话接手指南.md`](docs/新对话接手指南.md)
+—— 里面有当前的画像方向、进度、**和一批踩过的坑**（省得再踩一遍）。
 
 完整开发指南见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，
 功能进度见 **[docs/ROADMAP.md](docs/ROADMAP.md)**，
