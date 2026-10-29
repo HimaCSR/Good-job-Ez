@@ -55,39 +55,43 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/9 单元测试 ==="
+    say "=== 1/10 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/9 桌面端 JS 语法 ==="
+    say "=== 2/10 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/9 桌面端 CSS 类存在性 ==="
+    say "=== 3/10 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/9 桌面端 jsx children 位置 ==="
+    say "=== 4/10 桌面端 jsx children 位置 ==="
     cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
 
     say ""
-    say "=== 5/9 脱敏扫描 ==="
+    say "=== 5/10 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 6/9 桌面端表单交互 ==="
+    say "=== 6/10 桌面端表单交互 ==="
     cmd_check_form_input || die "桌面端表单输入有问题（打字打不进去 / 技能加不上）"
 
     say ""
-    say "=== 7/9 岗位推荐折叠 ==="
+    say "=== 7/10 岗位推荐折叠 ==="
     cmd_check_job_collapse || die "岗位推荐折叠有问题（不是前 5 条 / 展开收起坏了）"
 
     say ""
-    say "=== 8/9 多 Python 版本 ==="
+    say "=== 8/10 多 Python 版本 ==="
     cmd_check_multi_python || die "某个 Python 版本上测试没过（CI 会红）"
 
     say ""
-    say "=== 9/9 仓库卫生 ==="
+    say "=== 9/10 模板卡片渲染 ==="
+    cmd_check_template_card || die "模板卡片在后端漏字段时会崩（整页渲染失败）"
+
+    say ""
+    say "=== 10/10 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查难过"
 
     ok "全部检查通过"
@@ -229,6 +233,48 @@ cmd_check_multi_python() {
     if [ "$ok_any" = "0" ]; then
         warn "本机没装其他 Python 版本，只跑了当前版本（CI 仍会验矩阵）"
     fi
+}
+
+# 简历模板卡片 —— **后端漏字段时不能崩**（jsdom 真渲染）
+#
+# ## 背景
+#
+# 用户报「简历模板模块无法打开」，整个路由渲染失败：
+#
+#     Cannot read properties of undefined (reading 'toUpperCase')
+#
+# 堆栈：`at TemplateCard (blob:...:2657:25)`
+#
+# 根因：`TemplateCard` 渲染角标时写 `tpl.format.toUpperCase()`，
+# 而 `template_info()` 原来**不返回 format** → undefined → 抛异常
+# → **React 整棵组件树崩掉**（错误边界接管，整页显示失败）。
+#
+# **为什么必须真渲染** —— 复刻逻辑只能验「表达式写了兜底」，
+# 真正的风险是「后端某天又少给一个字段」。
+cmd_check_template_card() {
+    local checker="$SCRIPT_DIR/verify-template-card.mjs"
+    local target="$PLUGIN_DIR/desktop/plugin.js"
+    [ -f "$checker" ] || { warn "找不到 verify-template-card.mjs，跳过"; return 0; }
+    [ -f "$target" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过模板卡片渲染检查"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$target"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$target")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
 }
 
 cmd_check_desktop_css() {
