@@ -9,9 +9,14 @@ import os
 import time
 from datetime import datetime
 
-from . import bbclient, storage
-from .config import load_config, load_profile
-from .matcher import score_job
+try:
+    from . import bbclient, storage
+    from .config import load_config, load_profile
+    from .matcher import score_job
+except ImportError:          # 脱离包单独导入时（单测 / 独立脚本）
+    import bbclient, storage
+    from config import load_config, load_profile
+    from matcher import score_job
 
 try:
     from .logging_setup import get_logger
@@ -236,7 +241,10 @@ def scan(args, **kwargs):
 def daily(args, **kwargs):
     """生成今日岗位日报（Markdown），存到 plugin-data/job-radar/reports/。"""
     try:
-        from . import report
+        try:
+            from . import report
+        except ImportError:          # 脱离包单独导入时（单测）
+            import report
         cfg = load_config()
         min_score = int(args.get("min_score", cfg["min_score"]))
         jobs = storage.jobs_since(days=1, min_score=min_score)
@@ -306,7 +314,10 @@ def push(args, **kwargs):
     `pushed_at` 存在 jobs 表里，跟用户自己标记的 status 分开。
     """
     try:
-        from . import push as push_mod
+        try:
+            from . import push as push_mod
+        except ImportError:          # 脱离包单独导入时（单测）
+            import push as push_mod
         cfg = load_config()
         min_score = int(args.get("min_score", cfg["min_score"]))
         max_jobs = int(args.get("max_jobs", 3))
@@ -339,7 +350,10 @@ def push(args, **kwargs):
 def login_status(args, **kwargs):
     """体检各站登录态，返回状态与剩余天数。"""
     try:
-        from . import browser_cookies, login_check
+        try:
+            from . import browser_cookies, login_check
+        except ImportError:          # 脱离包单独导入时（单测）
+            import browser_cookies, login_check
         cookies = browser_cookies.fetch_cookies()
         if not cookies:
             return json.dumps({
@@ -368,7 +382,10 @@ def resume_optimize(args, **kwargs):
     **不投递** —— 只生成草稿。save=True 才存进档案。
     """
     try:
-        from . import resume_builder, resume_store, resume_template
+        try:
+            from . import resume_builder, resume_store, resume_template
+        except ImportError:          # 脱离包单独导入时（单测）
+            import resume_builder, resume_store, resume_template
         job_id = args.get("job_id", "")
         template_id = args.get("template_id") or "classic"
         want_save = bool(args.get("save", False))
@@ -458,7 +475,10 @@ def resume_optimize(args, **kwargs):
 def resume_list(args, **kwargs):
     """简历档案列表（可带某岗位的匹配分排序）。"""
     try:
-        from . import resume_store
+        try:
+            from . import resume_store
+        except ImportError:          # 脱离包单独导入时（单测）
+            import resume_store
         limit = int(args.get("limit", 20))
         job_id = args.get("with_score_for") or ""
         items = resume_store.list_resumes(limit=limit)

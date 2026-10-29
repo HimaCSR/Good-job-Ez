@@ -284,7 +284,10 @@ def login_status():
 
     返回 {'sites': [{site, label, logged_in, detail}], 'cookie_count': int}
     """
-    from . import login_check
+    try:
+        from . import login_check
+    except ImportError:          # 脱离包单独导入时（单测）
+        import login_check
 
     cookies = read_cookies()
     result = login_check.check_from_cookies(cookies)

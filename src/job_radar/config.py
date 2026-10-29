@@ -193,7 +193,8 @@ def load_profile():
     if not os.path.exists(path):
         return dict(DEFAULT_PROFILE)
     try:
-        raw = open(path, encoding="utf-8").read()
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
         # 去掉整行注释
         cleaned = "\n".join(l for l in raw.splitlines()
                             if not l.strip().startswith("#"))

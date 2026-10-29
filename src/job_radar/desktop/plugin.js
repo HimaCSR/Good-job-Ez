@@ -513,6 +513,30 @@ function ExperienceForm({ exp, busy, onCancel, onSave }) {
   })
 }
 
+/* 示例画像 —— 给新用户一个「照着改」的起点。
+ *
+ * ## 为什么需要
+ *
+ * 新用户装完插件，画像是空的 → 方向、技能、城市全空 →
+ * **所有岗位分数都低** → 分数线一卡就全军覆没 →
+ * 看起来像「插件坏了」。
+ *
+ * 填一份示例，用户立刻能看懂每个字段是干什么的，
+ * 然后照着改成自己的。
+ *
+ * 示例用前端/three.js 那套 —— 不是推荐给谁，
+ * 只是**字段示例**，填完记得改。
+ */
+const SAMPLE_PROFILE = {
+  title_keywords_primary: ['前端', 'web前端'],
+  title_keywords: ['前端开发', '全栈'],
+  skills: ['javascript', 'vue', 'css', 'html5'],
+  cities: ['杭州'],
+  min_salary: 10,
+  min_experience_years: 1,
+  exclude_companies: ['外包', '劳务派遣'],
+}
+
 function ProfileView({ ctx, cfg, onSaved }) {
   const qc = useQueryClient()
   const profile = (cfg && cfg.profile) || {}
@@ -576,8 +600,52 @@ function ProfileView({ ctx, cfg, onSaved }) {
     return jsx(ErrorState, { message: '读不到个人画像' })
   }
 
+  // **还没填方向和技能** —— 新用户装完就是这个状态。
+  // 不引导的话，用户会看到「所有岗位分数都很低」，
+  // 以为插件坏了。
+  const isBlank = !((local.title_keywords_primary || []).length
+                    || (local.title_keywords || []).length
+                    || (local.skills || []).length)
+
   return jsxs(Fragment, {
     children: [
+      isBlank ? jsxs('div', {
+        className: 'rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-3',
+        children: [
+          jsx('div', {
+            className: 'text-sm font-medium',
+            children: '先填「主攻方向」和「我的技能」，才能开始匹配',
+          }),
+          jsx('div', {
+            className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+            children: '不知道填什么？点下面「填一份示例」，照着改成你自己的 —— ' +
+              '方向是岗位名里的词（命中就加分），技能是 JD 里提到的词。',
+          }),
+          jsx('div', { className: 'mt-2 flex gap-2', children: [
+            jsx(Button, {
+              size: 'sm',
+              variant: 'outline',
+              onClick: () => {
+                const next = {
+                  ...local,
+                  title_keywords_primary: SAMPLE_PROFILE.title_keywords_primary,
+                  title_keywords: SAMPLE_PROFILE.title_keywords,
+                  skills: SAMPLE_PROFILE.skills,
+                  cities: (local.cities || []).length ? local.cities : SAMPLE_PROFILE.cities,
+                  min_salary: local.min_salary || SAMPLE_PROFILE.min_salary,
+                  exclude_companies: (local.exclude_companies || []).length
+                    ? local.exclude_companies : SAMPLE_PROFILE.exclude_companies,
+                }
+                setLocal(next)
+                setDirty(true)
+                host.notify({ kind: 'info', message: '已填入示例 —— 记得改成你自己的' })
+              },
+              children: '填一份示例',
+            }),
+          ] }),
+        ],
+      }) : null,
+      isBlank ? jsx('div', { className: 'h-3' }) : null,
       jsx(Panel, {
         title: '身份信息',
         hint: '仅用于简历生成表单',
@@ -1925,8 +1993,28 @@ function SettingsView({ ctx, cfg }) {
 
   const set = (k, v) => setLocal((s) => ({ ...s, [k]: v }))
 
+  // **没关键词 = 抓不到任何东西** ——
+  // `tools.scan` 直接中止（「没有配置关键词」）。
+  // 不提示的话，用户点了「抓取」只看到没结果，不知道原因。
+  const noKeywords = !(local.keywords || []).length
+
   return jsxs(Fragment, {
     children: [
+      noKeywords ? jsxs('div', {
+        className: 'rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) p-3',
+        children: [
+          jsx('div', {
+            className: 'text-sm font-medium',
+            children: '还没有搜索关键词 —— 没有它抓不到任何岗位',
+          }),
+          jsx('div', {
+            className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+            children: '填岗位名里的词，比如「跨境电商运营」「结构设计工程师」。' +
+              '一个关键词会按每个城市各抓一遍。',
+          }),
+        ],
+      }) : null,
+      noKeywords ? jsx('div', { className: 'h-3' }) : null,
       jsx(Panel, {
         title: '筛选条件',
         hint: '改动立即生效',

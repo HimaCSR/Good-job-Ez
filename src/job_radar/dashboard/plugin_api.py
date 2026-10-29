@@ -533,7 +533,8 @@ def _write_profile(prof: Dict[str, Any]) -> None:
         "#   - 数组用 [\"a\", \"b\"]\n"
         "#   - 最后一项后面不要加逗号\n"
         "#\n"
-        "# title_keywords：期望的岗位方向关键词（每个 +10，最多 30）\n"
+        "# title_keywords_primary：主攻方向（命中给满 30 分）\n"
+        "# title_keywords：也投的方向（命中给 15 分，排在主攻后面）\n"
         "# skills：你的技能，JD 里提到就加分（按覆盖率折算 30 分）\n"
         "# cities：期望城市列表，命中任一即算符合城市项\n"
         "# min_experience_years：期望最少年限（暂不参与评分）\n"
@@ -550,6 +551,11 @@ def _write_profile(prof: Dict[str, Any]) -> None:
 # ── 请求模型 ────────────────────────────────────────────────────────────────
 
 class ProfileIn(BaseModel):
+    # **主攻方向** —— 命中给满 30 分。
+    # 不加这个字段的话，Pydantic 会把前端传来的主攻方向**直接丢掉**
+    # （模型里没有的字段不保留）—— 界面填了，存不进去。
+    title_keywords_primary: List[str] = Field(default_factory=list)
+    # 也投的方向 —— 命中给 15 分，排在主攻后面
     title_keywords: List[str] = Field(default_factory=list)
     skills: List[str] = Field(default_factory=list)
     cities: List[str] = Field(default_factory=list)
