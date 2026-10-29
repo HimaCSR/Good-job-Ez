@@ -55,36 +55,40 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/8 单元测试 ==="
+    say "=== 1/9 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/8 桌面端 JS 语法 ==="
+    say "=== 2/9 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/8 桌面端 CSS 类存在性 ==="
+    say "=== 3/9 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/8 桌面端 jsx children 位置 ==="
+    say "=== 4/9 桌面端 jsx children 位置 ==="
     cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
 
     say ""
-    say "=== 5/8 脱敏扫描 ==="
+    say "=== 5/9 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 6/8 桌面端表单交互 ==="
+    say "=== 6/9 桌面端表单交互 ==="
     cmd_check_form_input || die "桌面端表单输入有问题（打字打不进去 / 技能加不上）"
 
     say ""
-    say "=== 7/8 岗位推荐折叠 ==="
+    say "=== 7/9 岗位推荐折叠 ==="
     cmd_check_job_collapse || die "岗位推荐折叠有问题（不是前 5 条 / 展开收起坏了）"
 
     say ""
-    say "=== 8/8 仓库卫生 ==="
-    bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查没过"
+    say "=== 8/9 多 Python 版本 ==="
+    cmd_check_multi_python || die "某个 Python 版本上测试没过（CI 会红）"
+
+    say ""
+    say "=== 9/9 仓库卫生 ==="
+    bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查难过"
 
     ok "全部检查通过"
 }
@@ -195,6 +199,36 @@ cmd_check_job_collapse() {
         target_arg="$(cygpath -w "$target")"
     fi
     "$node_exe" "$checker_arg" "$target_arg" || return 1
+}
+
+# **多 Python 版本检查** ——
+#
+# 本机是 3.14（Hermes 自带一堆库），CI 跑 3.11/3.12/3.13。
+# **本机全绿 ≠ CI 全绿** —— 本机恰恰是最宽松的环境。
+#
+# 本轮踩过：图片尺寸用 PIL（CI 没装）→ 三个 job 全红；
+# 测试 import Hermes 的 `plugins` 包（CI 没有）→ 三个 job 全红。
+#
+# 所以提交前**用本机有的所有版本各跑一遍**（3.11 没装就跳过，交给 CI）。
+cmd_check_multi_python() {
+    local ok_any=0 ver
+    # **不硬编码本机路径** —— 路径进版本管理会违反脱敏铁律。
+    # 用 `py` 启动器（Windows 自带）找版本；没有就跳过，交给 CI 矩阵。
+    if ! command -v py >/dev/null 2>&1; then
+        warn "没有 py 启动器，跳过多 Python 版本检查（CI 仍会验矩阵）"
+        return 0
+    fi
+    for ver in 3.12 3.13 3.11; do
+        # `py -3.12 -c "import sys"` 失败说明没装这个版本
+        py -"$ver" -c "import sys" >/dev/null 2>&1 || continue
+        ok_any=1
+        say "  → Python $ver"
+        ( cd "$PLUGIN_DIR" && py -"$ver" -m unittest discover -s tests ) \
+            || die "Python $ver 上测试没过（CI 会红）"
+    done
+    if [ "$ok_any" = "0" ]; then
+        warn "本机没装其他 Python 版本，只跑了当前版本（CI 仍会验矩阵）"
+    fi
 }
 
 cmd_check_desktop_css() {
