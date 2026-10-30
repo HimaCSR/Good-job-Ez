@@ -543,9 +543,25 @@ function ProfileView({ ctx, cfg, onSaved }) {
 
   const save = useMutation({
     mutationFn: async (next) => ctx.rest('/profile', { method: 'POST', body: next }),
-    onSuccess: () => {
+    // **后端会根据经历自动补方向词 + 重算岗位分数** ——
+    //
+    // 用户诉求：「每次保存个人信息，便重新根据经历内容更新期望内容标签，
+    // 保证抓取的岗位更加契合用户」。
+    //
+    // → 后端返回 `note`（补了哪些方向词）和 `rescored`（重算了几个岗位），
+    //   这里**告诉用户** —— 不说的话用户不知道画像变了。
+    onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['job-radar', 'config'] })
-      host.notify({ kind: 'success', message: '个人信息已保存' })
+      // **岗位分数变了 → 推荐列表也要重取**
+      qc.invalidateQueries({ queryKey: ['job-radar', 'jobs'] })
+      const note = (r && r.note) || ''
+      const rescored = (r && r.rescored) || 0
+      let msg = '个人信息已保存'
+      if (note) {
+        msg += ' · ' + note
+        if (rescored) msg += '（已重算 ' + rescored + ' 个岗位分数）'
+      }
+      host.notify({ kind: 'success', message: msg })
       setDirty(false)
       onSaved && onSaved()
     },

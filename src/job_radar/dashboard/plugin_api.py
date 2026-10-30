@@ -50,6 +50,8 @@ _SIBLINGS = (
     # **新增模块必须注册** —— 列表外的 .py 永远不会被 import
     # → `_sibling("template_slots")` 抛 ImportError → 端点直接 500。
     "template_slots",
+    # **从经历抽方向词** —— 保存画像时自动更新期望方向
+    "profile_derive",
     # **BOSS 城市码表** —— `/cities` 要返回两站并集
     "boss_city_codes",
 )
@@ -576,6 +578,26 @@ class SettingsIn(BaseModel):
     settings: Dict[str, Any] = Field(default_factory=dict)
 
 
+# **Pydantic 的注解是字符串** ——
+#
+# 本文件有 `from __future__ import annotations`，
+# 所有注解都是**延迟求值的字符串** → Pydantic 解析不到 `List`/`Dict` 的
+# 实际类型 → `TypeAdapter[ProfileIn] is not fully defined`。
+#
+# **本机踩过**：直接 `ProfileIn(**data)` 抛
+# `PydanticUserError: ProfileIn is not fully defined`。
+#
+# → 显式 rebuild 一次，把注解解析成真类型。
+#
+# **为什么之前没炸** —— FastAPI 在**装饰器**时就把路由签名解析好了，
+# 走 HTTP 是好的；**但代码里直接构造模型**（单测、脚本）会炸。
+for _model in (ProfileIn, SettingsIn):
+    try:
+        _model.model_rebuild()
+    except Exception:      # noqa: BLE001
+        pass
+
+
 # ── 路由 ────────────────────────────────────────────────────────────────────
 
 @router.get("/config")
@@ -620,10 +642,75 @@ def _with_defaults(settings: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.post("/profile")
 def save_profile(body: ProfileIn) -> Dict[str, Any]:
-    """保存个人画像。"""
+    """保存个人画像 —— **顺便根据经历更新方向词**。
+
+    用户诉求：
+
+    > 每次用户保存插件内的个人信息保存/更新，便重新根据经历内容
+    > 更新期望内容标签，保证抓取的岗位更加契合用户
+
+    ## 做了什么
+
+    1. **从经历抽方向词** → 补进 `title_keywords`（次要方向）
+    2. **重算所有老岗位的分数** —— 画像变了，分数要跟着变
+       （skill 里记着这个坑：「改了画像老岗位不重算」）
+    3. **返回变更说明** —— 前端告诉用户「根据你的经历补了这些方向」
+
+    ## 为什么不改「主攻方向」
+
+    主攻是**战略选择**（30 分 vs 15 分），自动抽的词只是「你干过什么」。
+    → 自动抽的进**次要方向**，主攻永远由用户自己定。
+
+    ## 为什么不自动补技能
+
+    技能项 = 30 分 × (命中数 / 技能总数) → 加技能会让分数**变低**。
+    本机踩过：加了 17 个技能 → 跨境电商运营 80 分掉到 70 分。
+
+    → **只加方向词**。
+    """
     prof = body.model_dump()
+
+    # ── ① 从经历补方向词 ──
+    derive_note = ""
+    added = {"directions": [], "skills": []}
+    try:
+        storage = _sibling("storage")
+        profile_derive = _sibling("profile_derive")
+        experiences = storage.list_experiences()
+        if experiences:
+            prof, derive_note, added = profile_derive.apply_to_profile(
+                prof, experiences)
+    except Exception as exc:      # noqa: BLE001
+        # **推导失败不能挡住保存** —— 用户填的东西要先存下来。
+        derive_note = "方向词自动更新失败：%s" % exc
+
     _write_profile(prof)
-    return {"ok": True, "profile": prof}
+
+    # ── ② 重算老岗位分数 ──
+    #
+    # **画像变了，分数必须跟着变** ——
+    # 否则「改了画像老岗位不重算」→ 老方向的高分岗位一直霸着推荐位。
+    rescored = 0
+    try:
+        storage = _sibling("storage")
+        matcher = _sibling("matcher")
+        experiences = storage.list_experiences()
+        # **`score_fn` 不是 `matcher`** —— rescore_all 的签名是
+        # `rescore_all(profile, experiences=None, score_fn=None)`。
+        rescored = storage.rescore_all(prof, experiences=experiences,
+                                       score_fn=matcher.score_job)
+    except Exception as exc:      # noqa: BLE001
+        rescored = 0
+        derive_note = (derive_note + "  " if derive_note else "") + \
+            "岗位分数重算失败：%s" % exc
+
+    return {
+        "ok": True,
+        "profile": prof,
+        "derived": added,
+        "note": derive_note,
+        "rescored": rescored,
+    }
 
 
 @router.post("/settings")
