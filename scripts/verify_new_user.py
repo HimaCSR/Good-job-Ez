@@ -80,7 +80,8 @@ def main():
         # ── ② 填画像 → 读回 ──
         from dashboard.plugin_api import ProfileIn, _write_profile
         payload = ProfileIn(
-            title_keywords_primary=["跨境电商运营"],
+            title_keywords_primary=["跨境电商运营", "亚马逊运营",
+                                    "速卖通运营", "跨境电商专员"],
             title_keywords=["结构设计"],
             skills=["SEO", "选品", "亚马逊"],
             cities=["重庆"],
@@ -90,7 +91,7 @@ def main():
         _write_profile(payload)
         back = jr_config.load_profile()
         check("② 主攻方向存住了（前端填的能存进去）",
-              back.get("title_keywords_primary") == ["跨境电商运营"],
+              back.get("title_keywords_primary") == payload["title_keywords_primary"],
               str(back.get("title_keywords_primary")))
         check("② 也投方向存住了",
               back.get("title_keywords") == ["结构设计"])
@@ -115,9 +116,19 @@ def main():
 
         # ── ④ 打分：主攻方向排前面 ──
         top = jobs[0]
+        # **理由文案跟着评分模型走** ——
+        #
+        # 权重制改造后，方向项的理由是
+        # 「方向命中（按经历评定）」/「方向匹配经历」，
+        # **不再是**旧的「主攻方向命中」。
+        #
+        # **踩过**：脚本还查旧文案 → 断言永远红 → 看起来像功能坏了，
+        # 其实是断言过时（跟「改了评分文案要全仓搜」是同一条规则）。
+        top_why = top.get("why") or top.get("reasons") or []
         check("④ 第一条命中主攻方向",
-              any("主攻方向命中" in w for w in (top.get("why") or [])),
-              "%s（%d 分）" % (top.get("title"), top.get("score")))
+              any(("方向命中" in w) or ("方向匹配经历" in w) for w in top_why),
+              "%s（%d 分）：%s" % (top.get("title"), top.get("score"),
+                                " / ".join(top_why[:3])))
         check("④ 分数在 0-100",
               all(0 <= (j.get("score") or 0) <= 100 for j in jobs))
         cities = set()

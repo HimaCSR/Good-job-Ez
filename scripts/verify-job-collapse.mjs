@@ -109,6 +109,16 @@ async function loadPlugin(sdk) {
 
 // 造 8 条岗位，**故意乱序**（分数从低到高）——
 // 验证前端自己会排序，不能依赖后端的顺序。
+//
+// ## ⚠️ 每条岗位**必须带 `direction`**
+//
+// 推荐列表现在**按方向去重**（每方向最多 PER_TYPE=3 条），
+// 而且「其它」（`direction` 为空或等于「其它」）**不进顶部**。
+//
+// **踩过**：这个脚本原来造的岗位**没有 direction 字段**
+// → 8 条全被判成「其它」→ 全进 overflow → `deduped` 为空
+// → **渲染 0 条** → 4 个断言全红。
+// **但代码是对的** —— 是验证脚本没跟上新功能。
 function makeJobs(n) {
   const out = []
   for (let i = 0; i < n; i++) {
@@ -122,6 +132,9 @@ function makeJobs(n) {
       tags: ['Java'],
       reasons: ['会 Java'],
       missing: [],
+      // **两个方向交替** —— 每个方向 4 条 → 每方向留 3 条
+      // → 去重后 6 条 → 顶部显示 5 条 → 折叠区剩 1 条
+      direction: i % 2 === 0 ? '电商运营' : '建筑施工管理',
     })
   }
   return out
@@ -187,17 +200,25 @@ async function main() {
   })
 
   let titles = jobTitles()
+  // ── 去重后的预期 ──
+  //
+  // 8 条岗位，两个方向交替，每方向 4 条 → **每方向留 3 条**（PER_TYPE）
+  // → 去重后 6 条（分数 75,70,65,60,55,50）→ 顶部显示前 5 条
+  // → 折叠区剩 **1** 条
   check('默认只渲染 5 条岗位', titles.length === 5,
         `实际 ${titles.length} 条：${titles.join(',')}`)
   check('显示的是分数最高的 5 条',
-        titles.includes('岗位7') && titles.includes('岗位3') &&
+        titles.includes('岗位7') && titles.includes('岗位6') &&
+        titles.includes('岗位5') && titles.includes('岗位4') &&
+        titles.includes('岗位3') &&
         !titles.includes('岗位0') && !titles.includes('岗位1'),
         titles.join(','))
 
   // ── 有「更多岗位」按钮 ──
   let mb = moreBtn()
   check('有「更多岗位」按钮', !!mb, mb ? (mb.textContent || '').trim() : '没找到')
-  check('按钮上标了还剩几条', !!mb && (mb.textContent || '').includes('3'),
+  // **剩 1 条**（去重后 6 条 - 顶部 5 条）
+  check('按钮上标了还剩几条', !!mb && (mb.textContent || '').includes('1'),
         mb ? (mb.textContent || '').trim() : '')
 
   // ── 展开 ──

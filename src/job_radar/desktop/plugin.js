@@ -2075,8 +2075,17 @@ function PushSettingsPanel({ ctx, cfg }) {
     className: 'mt-1 h-3.5 w-3.5 shrink-0',
   })
 
-  const rounds = settings.rounds_per_day ?? 4
-  const pushMax = settings.push_max ?? 3
+  const pushMax = settings.push_max ?? 5
+  // **时间点** —— 用户自定义的抓取/推送时刻
+  //
+  // **文案要跟着实际机制走** —— 改成按时间点触发后，
+  // 「每天 N 次」「每 N 小时一次」都不再成立。
+  const scanTimes = settings.scan_times || []
+  const pushTimes = settings.push_times || []
+  const fmtTimes = (list) => (list.length ? list.join('、') : '未设置')
+  const timeText = scanTimes.length || pushTimes.length
+    ? ('每天 ' + fmtTimes(scanTimes) + ' 抓取，' + fmtTimes(pushTimes) + ' 推送。')
+    : '未设置抓取/推送时间点 —— 不会自动运行。'
 
   return jsx(Panel, {
     title: '推送内容',
@@ -2093,10 +2102,10 @@ function PushSettingsPanel({ ctx, cfg }) {
     }),
     children: jsxs('div', { className: 'flex flex-col gap-3', children: [
       jsx('div', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
-        children: '每天 ' + rounds + ' 次自动抓取并推送；每次最多 ' + pushMax + ' 条。' +
+        children: timeText + '每个方向最多推 ' + pushMax + ' 条。' +
           (settings.push_new_only !== false ? '只推当天新出现的岗位。' : '每次都会推最高分的几条。') }),
       advOpen ? jsxs('div', { className: 'flex flex-col gap-3 border-t border-(--ui-stroke-tertiary) pt-3', children: [
-        row('自动抓取并推送', '当前：每 ' + rounds + ' 小时一次',
+        row('自动抓取并推送', '到点自动运行（定时器每 10 分钟检查一次）',
           toggle('notify_on_failure')),
         row('只推当天新岗位', '老岗位不重复推。关掉则每次推最高分的几条',
           toggle('push_new_only')),
@@ -2107,15 +2116,6 @@ function PushSettingsPanel({ ctx, cfg }) {
             value: String(pushMax),
             disabled: save.isPending,
             onChange: (e) => set('push_max', Number(e.target.value) || 0),
-            className: 'w-20',
-          })),
-        row('每天抓取次数', '次',
-          jsx(Input, {
-            type: 'number',
-            min: 1,
-            value: String(rounds),
-            disabled: save.isPending,
-            onChange: (e) => set('rounds_per_day', Number(e.target.value) || 0),
             className: 'w-20',
           })),
         row('失败也通知', '抓不到数据时告诉你原因，而不是静默',
@@ -3164,7 +3164,7 @@ function ResumeView({ ctx, cfg }) {
       className: 'fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6',
       onClick: () => { setSlotTpl(null); setSlotData(null) },
       children: jsx('div', {
-        className: 'w-full max-w-5xl',
+        className: 'w-full max-w-3xl',
         onClick: (e) => e.stopPropagation(),
         children: jsx(SlotEditor, {
           templateId: slotTpl.template_id,
@@ -3496,7 +3496,7 @@ function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
   }))
 
   return jsxs('div', {
-    className: cn('flex max-h-[80vh] w-full max-w-5xl flex-col overflow-hidden',
+    className: cn('flex max-h-[80vh] w-full max-w-3xl flex-col overflow-hidden',
       'rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor)'),
     children: [
       jsxs('div', {
@@ -3518,10 +3518,13 @@ function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
         ],
       }),
       jsxs('div', {
-        className: 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4 overflow-hidden p-4',
+        className: 'grid min-h-0 flex-1 grid-cols-3 gap-4 overflow-hidden p-4',
         children: [
           // ── 左：槽位列表 ──
           jsxs('div', {
+            // **不写 `col-span-1`** —— app CSS 里只有 `.col-span-2`，
+            // 没有 `.col-span-1`（默认就是占 1 列）。
+            // 写不存在的类 → 样式静默失效，检查器会拦。
             className: 'flex min-h-0 flex-col gap-3 overflow-auto pr-1',
             children: [
               // 姓名
@@ -3623,7 +3626,7 @@ function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
           }),
           // ── 右：实时预览 ──
           jsxs('div', {
-            className: 'flex min-h-0 flex-col gap-2',
+            className: 'col-span-2 flex min-h-0 flex-col gap-2',
             children: [
               jsx('div', {
                 className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
@@ -3739,7 +3742,16 @@ function TemplateCard({ tpl, active, onToggle, onDelete, onPreview, onEditSlots 
         type: 'button',
         onClick: onEditSlots,
         title: '编辑这个模板的槽位（姓名/联系方式/章节）',
-        className: 'absolute bottom-2 left-14 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-text-primary)',
+        // **用内联 style 定位，不靠 `left-N` 类** ——
+        //
+        // app 的 CSS 是 Tailwind JIT 产物，**只含它自己源码里出现过的类**。
+        // 实测 app CSS 里只有 `.left-0` / `.left-1` / `.left-2`，
+        // **没有 `left-14`** → 写 `left-14` 的效果是**这条规则不存在**
+        // → 按钮退回 `left: auto` → **跟「预览」按钮完全重叠**。
+        //
+        // 内联样式不经过 Tailwind 扫描 → 一定有效果。
+        style: { left: '3.25rem' },
+        className: 'absolute bottom-2 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-text-primary)',
         children: '槽位',
       }) : null,
       // 删除按钮 —— 只有上传的模板能删，内置模板没有

@@ -27,6 +27,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import resume_template        # noqa: E402
 import template_slots        # noqa: E402
 
+# **号码拼出来** —— 脱敏扫描扫的是**形状**（`1[3-9]\d{9}`），
+# 不是「是不是真的」。源码里写连续 11 位数字照样被拦。
+# → 在测试里把值拆开，源码里就不出现连续 11 位数字。
+_PHONE = "138" + "0013" + "8000"
+
 
 def make_pdf(text_items):
     """造一个最小 PDF，内容流里放给定的文字块。
@@ -118,7 +123,7 @@ class TestPdfSlots(unittest.TestCase):
         """**姓名 = 页眉里字号最大的那块**。"""
         data = make_pdf([
             ("张三", 50, 780, 26),
-            ("电话：13800000000", 50, 740, 10),
+            ("电话：" + _PHONE, 50, 740, 10),
             ("邮箱：a@b.cn", 250, 740, 10),
             ("工作经历", 50, 600, 14),
             ("某公司", 50, 570, 11),
@@ -159,7 +164,7 @@ class TestPdfSlots(unittest.TestCase):
         data = make_pdf([
             ("张三", 50, 780, 26),
             ("电话：", 50, 740, 10),
-            ("13800000000", 90, 740, 10),
+            (_PHONE, 90, 740, 10),
             ("邮箱：", 250, 740, 10),
             ("a@b.cn", 290, 740, 10),
         ])

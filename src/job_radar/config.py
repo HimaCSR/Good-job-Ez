@@ -193,10 +193,28 @@ def load_config():
         "sites": get("sites", default=["zhaopin"]),
         "request_gap_seconds": int(get("request_gap_seconds", default=12)),
         "rounds_per_day": int(get("rounds_per_day", default=4)),
-        "push_max": int(get("push_max", default=3)),
+        # **每方向推几条** —— 与 plugin.yaml 一致（5，不是 3）
+        "push_max": int(get("push_max", default=5)),
         "push_new_only": bool(get("push_new_only", default=True)),
         "notify_on_failure": bool(get("notify_on_failure", default=True)),
         "active_hours": get("active_hours", default="09:00 - 22:00"),
+        # ────────────────────────────────────────────────────────────
+        # **下面三个键不能漏** ——
+        #
+        # `tools.directions()` 拿 `load_config()` 的整份结果去
+        # `_write_config()` **写回**（`cfg["directions"] = uniq`）。
+        # 这里漏掉哪个键 → 写回时那个键就**被默认值覆盖**。
+        #
+        # **踩过**：`directions` 漏了 → 用户选的方向被默认值 [] 冲掉
+        # → 「每天只推一个方向」退化成「推分数最高的方向」。
+        # `scan_times` / `push_times` 漏了 → 同理，用户配的时间点被冲掉。
+        #
+        # **有 ctx 和没 ctx 两个分支的键必须一致** ——
+        # 独立脚本（cron）走的是没 ctx 那条路。
+        # ────────────────────────────────────────────────────────────
+        "directions": get("directions", default=[]),
+        "scan_times": get("scan_times", default=[]),
+        "push_times": get("push_times", default=[]),
     }
 
 

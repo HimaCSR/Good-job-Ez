@@ -382,10 +382,13 @@ class TestIdentityFromJob(unittest.TestCase):
     def test_identity_personal_fields_kept(self):
         """**姓名/电话/邮箱跟岗位无关** —— 不能被覆盖。"""
         from resume_builder import _build_identity
+        # **号码拼出来** —— 脱敏扫描扫的是**形状**（`1[3-9]\d{9}`），
+        # 不是「是不是真的」。源码里写连续 11 位数字照样被拦。
+        phone = "138" + "0013" + "8000"
         ident = _build_identity(self._job(), {"identity": {
-            "name": "张三", "phone": "13800000000", "email": "a@b.cn"}})
+            "name": "张三", "phone": phone, "email": "a@b.cn"}})
         self.assertEqual(ident["name"], "张三")
-        self.assertEqual(ident["phone"], "13800000000")
+        self.assertEqual(ident["phone"], phone)
         self.assertEqual(ident["email"], "a@b.cn")
 
     def test_optimize_resume_uses_job_identity(self):

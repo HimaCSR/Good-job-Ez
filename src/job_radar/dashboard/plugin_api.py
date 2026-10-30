@@ -636,6 +636,14 @@ def get_config() -> Dict[str, Any]:
 
 
 # manifest plugin.yaml 的 config_schema 默认值（与那边保持一致）
+#
+# ⚠️ **必须跟 plugin.yaml 的 config_schema 对齐** ——
+# 设置页用这份默认值去补「用户没配过的键」。
+# 漏一个键 → 前端拿到 undefined → 那个输入框显示空白/保存后又被填回去。
+#
+# **踩过**：`scan_times` / `push_times` / `directions` 三个键漏在这里
+# → 设置页的「每天抓取时间 / 每天推送时间」编辑器**读不到用户配的值**
+# → 用户配了时间点，页面上却显示空白（像没保存）。
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "keywords": [],
     "city": "653",
@@ -645,10 +653,17 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "sites": ["zhaopin"],
     "request_gap_seconds": 12,
     "rounds_per_day": 4,
-    "push_max": 3,
+    # **每方向推几条** —— 与 plugin.yaml 一致（5，不是 3）
+    "push_max": 5,
     "push_new_only": True,
     "notify_on_failure": True,
     "active_hours": "09:00 - 22:00",
+    # **用户可选方向** —— 空 = 全方向都算
+    "directions": [],
+    # **抓取/推送时间点** —— 与 plugin.yaml 一致
+    "scan_times": ["09:00", "13:00", "17:00", "21:00"],
+    "push_times": ["09:30", "17:30"],
+    "mock": False,
 }
 
 
