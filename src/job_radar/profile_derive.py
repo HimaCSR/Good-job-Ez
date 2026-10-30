@@ -431,6 +431,162 @@ def _skill_hits(text):
     return hits
 
 
+# ── 方向词权重 ──────────────────────────────────────────────────────────────
+#
+# ## 为什么要权重（而不是数个数）
+#
+# 用户诉求：「根据经历内容**评定**，灵活调整期望方向，**不分主次**」。
+#
+# 「干过 3 年跨境电商运营」和「实习过 2 个月客服」——
+# 这两个方向词**不该同权**。数个数分不出这个差别。
+#
+# ## 权重怎么算
+#
+# | 因素 | 加成 | 为什么 |
+# | --- | --- | --- |
+# | **职位名命中** | ×3 | 职位名就是那段时间的主线工作 |
+# | **最近的经历** | 越近越高（0.5 ~ 1.0） | 近的更能代表「现在想做什么」 |
+# | **时长** | 每年 +0.2（上限 +1.0） | 干得久 = 更懂 = 更匹配 |
+# | **bullets 里出现** | ×1 | 辅助信号 |
+# | **用户自己标的主攻** | +1.5 | 显式声明的意图优先 |
+#
+# ## 归一化
+#
+# 算出来的权重**归一到 0.5 ~ 3.0**：
+# - 1.0 = 一般水平
+# - 3.0 = 最强的方向
+#
+# → 评分时「命中词的权重之和」上限 30 分。
+#
+# **不分主次** —— 主攻方向只是权重更高一点，不是另一套规则。
+
+def _parse_months(text):
+    """「2025-07」「2025.07」「2025/07」「2025」→ (年, 月)。解析不了返回 None。"""
+    m = re.search(r"(\d{4})\s*[-/.年]\s*(\d{1,2})?", str(text or ""))
+    if not m:
+        m = re.search(r"(\d{4})", str(text or ""))
+        if not m:
+            return None
+        return (int(m.group(1)), 1)
+    month = int(m.group(2)) if m.group(2) else 1
+    return (int(m.group(1)), month)
+
+
+def _recency_factor(start, end, now=None):
+    """经历的时间权重系数（0.5 ~ 1.0）。
+
+    **越近越高** —— 「现在想做什么」跟最近的经历最相关。
+    """
+    import datetime as _dt
+    if now is None:
+        now = _dt.datetime.now()
+    if now is None:
+        return 0.7
+    ym = _parse_months(end) or _parse_months(start)
+    if not ym:
+        return 0.7
+    try:
+        d = now.date() - _dt.date(ym[0], min(12, max(1, ym[1])), 1)
+    except ValueError:
+        return 0.7
+    months = max(0, d.days // 30)
+    # **每 12 个月衰减 0.1**，下限 0.5
+    return max(0.5, 1.0 - 0.1 * (months // 12))
+
+
+def _duration_factor(start, end):
+    """时长系数（1.0 ~ 2.0）—— 干得久 = 更匹配。
+
+    每年 +0.2，最多 +1.0。
+    """
+    y1 = _parse_months(start)
+    y2 = _parse_months(end)
+    if not y1 or not y2:
+        return 1.0
+    months = (y2[0] - y1[0]) * 12 + (y2[1] - y1[1])
+    if months <= 0:
+        return 1.0
+    years = months / 12.0
+    return min(2.0, 1.0 + 0.2 * years)
+
+
+def score_direction_weights(experiences, profile=None, max_direction=12):
+    """经历 → 方向词权重表 ``{词: 权重}``。
+
+    权重**归一到 0.5 ~ 3.0**（1.0 = 一般，3.0 = 最强）。
+
+    ## 主攻方向怎么处理
+
+    **不分主次** —— 主攻方向**也进这张表**，权重 +1.5。
+    不是另开一套规则，是同一张表里权重高一点。
+
+    → 评分时只认这张表 → 主次差异体现在**权重**上，不体现在**规则**上。
+    """
+    from collections import defaultdict
+
+    raw = defaultdict(float)
+
+    for exp in (experiences or []):
+        title = exp.get("title") or ""
+        company = exp.get("company") or ""
+        bullets = exp.get("bullets") or []
+        if isinstance(bullets, str):
+            try:
+                import json
+                bullets = json.loads(bullets)
+            except Exception:
+                bullets = [bullets]
+        tags = exp.get("tags") or []
+        if isinstance(tags, str):
+            try:
+                import json
+                tags = json.loads(tags)
+            except Exception:
+                tags = [tags]
+
+        recency = _recency_factor(exp.get("start"), exp.get("end"))
+        duration = _duration_factor(exp.get("start"), exp.get("end"))
+        base = recency * duration
+
+        # **职位名** —— 那段时间的主线工作
+        for w in _title_candidates(title):
+            raw[w] += 3.0 * base
+        # **bullets 里的业务词** —— 辅助信号
+        blob = " ".join(str(b) for b in bullets)
+        for w in _bullet_direction_hits(blob):
+            raw[w] += 1.0 * base
+        # **用户自己打的标签** —— 显式声明，权重最高
+        for extra in (tags or []):
+            if isinstance(extra, str) and extra.strip():
+                for w in _title_candidates(extra.strip()):
+                    raw[w] += 4.0 * base
+
+    # ── 归一化 ──
+    candidates = [(w, v) for w, v in raw.items()
+                  if w not in GENERIC_TITLE_WORDS and w not in STOP_WORDS]
+    if not candidates:
+        return {}
+    top = max(v for _w, v in candidates)
+    out = {}
+    for w, v in sorted(candidates, key=lambda kv: (-kv[1], -len(kv[0]), kv[0])):
+        # **归一到 0.5 ~ 3.0**
+        weight = 0.5 + 2.5 * (v / top) if top > 0 else 1.0
+        out[w] = round(weight, 2)
+        if len(out) >= max_direction:
+            break
+
+    # ── 主攻方向也进这张表（+1.5）──
+    #
+    # **不分主次** —— 同一张表，只是权重不同。
+    primary = (profile or {}).get("title_keywords_primary") or []
+    for w in primary:
+        k = w.strip()
+        if not k or k in GENERIC_TITLE_WORDS:
+            continue
+        out[k] = round(min(3.0, out.get(k, 1.0) + 1.5), 2)
+    return out
+
+
 # ── 合并进画像 ──────────────────────────────────────────────────────────────
 #
 # **只补充，不删除，不覆盖。**
@@ -474,6 +630,12 @@ def apply_to_profile(profile, experiences, max_direction=12, max_skills=0):
     out = dict(profile or {})
     out["title_keywords"] = list(out.get("title_keywords") or [])
     out["skills"] = list(out.get("skills") or [])
+    # **方向词权重** —— 按经历评定（0.5 ~ 3.0）
+    #
+    # **这是「不分主次」的实现**：
+    # 主攻方向也进这张表，权重 +1.5 —— 不是另一套规则。
+    out["direction_weights"] = score_direction_weights(
+        experiences, profile, max_direction=max_direction)
 
     # **用户手填的词保留在前面** —— 自动抽的词**追加**在后面。
     #

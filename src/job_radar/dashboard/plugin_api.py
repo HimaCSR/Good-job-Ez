@@ -572,6 +572,13 @@ class ProfileIn(BaseModel):
     exclude_companies: List[str] = Field(default_factory=list)
     identity: Dict[str, Any] = Field(default_factory=dict)
     experience_text: str = ""
+    # **方向词权重** —— 按经历评定的方向强度（0.5 ~ 3.0）
+    #
+    # **不分主次** —— 主攻方向也在这张表里，只是权重高一点。
+    # 评分时只认这张表 → 主次差异体现在**权重**上，不体现在**规则**上。
+    #
+    # 不加这个字段 → Pydantic 会把前端传来的权重**直接丢掉**。
+    direction_weights: Dict[str, float] = Field(default_factory=dict)
 
 
 class SettingsIn(BaseModel):
@@ -745,15 +752,102 @@ def _normalize_job(job: Dict[str, Any]) -> Dict[str, Any]:
         out["area"] = out.get("city") or ""
     if not out.get("city"):
         out["city"] = out.get("area") or ""
+    # **岗位类型标识** —— 前端按它做「同类型只推前 3」
+    #
+    # **必须后端算** —— 归一化规则（去职级后缀、去括号…）
+    # 有一套，Python 和 JS 各写一份必然分家。
+    #
+    # 前端拿 `type_key` 直接分组，不用再猜。
+    #
+    # ## 怎么定类型
+    #
+    # **优先用「命中的方向词」** —— 比标题归一化准：
+    #
+    # ```
+    # 「ebay（易贝）shopee（虾皮） 跨境电商运营」
+    #   标题归一化 → ebayshopee跨境电商运营  ← 平台前缀挡着，不是同一类
+    #   按方向词   → 跨境电商运营            ← 对
+    # ```
+    #
+    # 平台前缀（ebay/shopee/amazon…）是**销售渠道**，不是**岗位类型**。
+    try:
+        matcher = _sibling("matcher")
+        prof = _read_profile()
+        dw = prof.get("direction_weights") or {}
+        dirs = list(dw.keys())
+        dirs += list(prof.get("title_keywords_primary") or [])
+        dirs += list(prof.get("title_keywords") or [])
+        hay = " ".join(str(out.get(k) or "") for k in
+                       ("title", "jd_text", "description", "company"))
+        out["type_key"] = matcher.job_type_by_direction(
+            out.get("title") or "", haystack=hay, direction_words=dirs,
+            direction_weights=dw)
+    except Exception:
+        try:
+            out["type_key"] = _sibling("matcher").job_type_key(
+                out.get("title") or "")
+        except Exception:
+            out["type_key"] = ""
     return out
 
 
 @router.get("/jobs")
-def list_jobs(limit: int = 30, min_score: int = 0) -> Dict[str, Any]:
-    """岗位池（按匹配度倒序）。"""
+def list_jobs(limit: int = 120, min_score: int = 0,
+              per_type: int = 3) -> Dict[str, Any]:
+    """岗位池（按匹配度倒序）—— **同类型只给最高分的 N 条**。
+
+    ## 同类型怎么判
+
+    `matcher.job_type_key(title)` —— 把标题归一化成**类型**：
+
+    ```
+    跨境电商运营助理                → 跨境电商运营
+    跨境电商运营专员（速卖通/eBay） → 跨境电商运营
+    跨境电商运营主管                → 跨境电商运营
+    ```
+
+    **职级后缀（助理/专员/主管/经理）全部去掉** ——
+    那是同一类岗位的不同层级，不该拆成不同类型。
+
+    ## 为什么必须做
+
+    实测：主攻「跨境电商运营」→ 岗位池 30 条**全是**跨境电商运营的
+    不同措辞 → 推荐列表被同一个方向刷屏，用户看不到别的机会。
+
+    → **每个类型只留最高分的 3 条**，其余折叠（「看全部」里还能看到）。
+
+    ## per_type=0 → 不限制
+
+    「看全部」时前端会传 `per_type=0` → 全量返回。
+    """
     storage = _sibling("storage")
+    matcher = _sibling("matcher")
     jobs = storage.all_jobs(limit=limit, min_score=min_score)
-    return {"jobs": [_normalize_job(j) for j in jobs], "count": len(jobs)}
+    normalized = [_normalize_job(j) for j in jobs]
+
+    if per_type and per_type > 0:
+        seen = {}
+        for j in normalized:
+            # **必须用 `j["type_key"]`**（方向词法）——
+            # 不能在这里另算一遍「标题法」，
+            # 否则**两套键** → 前端分组和这里标记对不上。
+            #
+            # 本机踩过：这里用 `job_type_key(title)`，而 `_normalize_job`
+            # 用 `job_type_by_direction(...)` → 键不同
+            # → 标记数 21，预期 23 → 测试直接挂。
+            key = j.get("type_key") or ""
+            # **空标题的岗位不参与分组** —— 否则全挤成一组
+            if not key:
+                key = "__other__"
+            seen.setdefault(key, 0)
+            seen[key] += 1
+            if seen[key] > per_type:
+                j["_over_type_limit"] = True
+        # **把超额的排到最后**（不删 —— 「看全部」还要能翻到）
+        normalized.sort(key=lambda j: (1 if j.get("_over_type_limit") else 0,
+                                       -(j.get("score") or 0)))
+
+    return {"jobs": normalized, "count": len(normalized)}
 
 
 @router.get("/runs")

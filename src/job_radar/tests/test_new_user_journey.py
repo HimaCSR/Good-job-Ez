@@ -242,7 +242,10 @@ class TestNewUserJourney(unittest.TestCase):
             self.assertGreaterEqual(r["score"], 0)
             self.assertLessEqual(r["score"], 100)
         self.assertGreater(good["score"], bad["score"])
-        self.assertTrue(any("主攻方向命中" in x for x in good["reasons"]))
+        # **方向命中要说清楚** —— 旧文案是「主攻方向命中」，
+        # 现在改成「方向命中（按经历评定）」，主次不再分开写。
+        self.assertTrue(any("方向命中" in x for x in good["reasons"]),
+                        good["reasons"])
 
     # ── ④ 简历优化 ──
 

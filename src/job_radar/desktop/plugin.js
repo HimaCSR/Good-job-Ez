@@ -156,7 +156,14 @@ function useConfig(ctx) {
 function useJobs(ctx, minScore) {
   return useQuery({
     queryKey: ['job-radar', 'jobs', minScore],
-    queryFn: async () => ctx.rest('/jobs?limit=30&min_score=' + (minScore || 0)),
+    // **取 120 条** —— 不是 30。
+    //
+    // 「同类型只推前 3」要**有别的类型可选**：
+    // 池子顶部 30 条常常全是同一个方向（实测 30/30 都是跨境电商运营）
+    // → 只取 30 条 → 去重后只剩 3 条 → 用户看不到别的机会。
+    //
+    // 取 120 条 → 去重后能覆盖多种类型。
+    queryFn: async () => ctx.rest('/jobs?limit=120&min_score=' + (minScore || 0)),
     refetchInterval: 30000,
   })
 }
@@ -1522,8 +1529,42 @@ function RecommendView({ ctx, cfg }) {
   // 「Cannot access 'showAllJobs' before initialization」（整页白屏）。
   const ranked = jobs.slice().sort((a, b) => (b.score || 0) - (a.score || 0))
   const TOP_N = 5
-  const topJobs = showAllJobs ? ranked : ranked.slice(0, TOP_N)
-  const restCount = Math.max(0, ranked.length - TOP_N)
+  const PER_TYPE = 3
+
+  // **同类型只推最高分前 3** ——
+  //
+  // 用户诉求：「同一类型岗位只推最高分前 3 项」。
+  //
+  // ## 后端做了什么
+  //
+  // `plugin_api.list_jobs` 把超额的岗位**排到最后**并打了
+  // `_over_type_limit` 标记（类型判定在 `matcher.job_type_key`）。
+  //
+  // ## 前端还要再做一次
+  //
+  // **后端的「排到最后」不够** —— 折叠区默认只显示前 TOP_N 条，
+  // 而前 TOP_N 条**可能全是同类型**（比如 5 条跨境电商运营）。
+  //
+  // → 前端再按类型去重：**每类最多 PER_TYPE 条**，
+  //   剩下的进「更多岗位」。
+  //
+  // **为什么在前端做** —— 折叠/展开是**纯前端行为**，
+  // 后端不知道用户是不是在看折叠区。
+  const seenTypes = {}
+  const deduped = []
+  const overflow = []
+  for (const j of ranked) {
+    const key = (j && j.type_key) || ''
+    if (!key) { deduped.push(j); continue }   // 没有类型 → 不参与去重
+    const n = seenTypes[key] || 0
+    seenTypes[key] = n + 1
+    if (n < PER_TYPE) deduped.push(j)
+    else overflow.push(j)
+  }
+  const topJobs = showAllJobs ? ranked : deduped.slice(0, TOP_N)
+  const restCount = Math.max(0, (showAllJobs ? ranked.length : deduped.length) - TOP_N)
+  // **同类型折叠掉的条数** —— 告诉用户「还有 N 条同类型的在下面」
+  const dupCount = overflow.length
   React.useEffect(() => { setLocal(settings) }, [settings])
   const save = useMutation({
     mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
@@ -1569,13 +1610,29 @@ function RecommendView({ ctx, cfg }) {
                     // 其余的折叠起来 —— 「更多岗位」
                     restCount > 0 && jsx('div', {
                       className: 'border-t border-(--ui-stroke-tertiary) px-4 py-2',
-                      children: jsx(Button, {
-                        size: 'sm',
-                        variant: 'outline',
-                        onClick: () => setShowAllJobs((v) => !v),
-                        children: showAllJobs
-                          ? '收起（只显示前 ' + TOP_N + ' 条）'
-                          : '更多岗位（还有 ' + restCount + ' 条）',
+                      children: jsxs('div', {
+                        className: 'flex flex-wrap items-center gap-2',
+                        children: [
+                          jsx(Button, {
+                            size: 'sm',
+                            variant: 'outline',
+                            onClick: () => setShowAllJobs((v) => !v),
+                            children: showAllJobs
+                              ? '收起（只显示前 ' + TOP_N + ' 条）'
+                              : '更多岗位（还有 ' + restCount + ' 条）',
+                          }),
+                          // **同类型折叠了多少条** ——
+                          //
+                          // 用户诉求：「同一类型岗位只推最高分前 3 项」。
+                          // → 要**看得见**折叠了多少，不然用户以为只有这几条。
+                          !showAllJobs && dupCount > 0
+                            ? jsx('span', {
+                                className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                                children: '（同类只保留前 ' + PER_TYPE
+                                  + ' 条，另有 ' + dupCount + ' 条同类已折叠）',
+                              })
+                            : null,
+                        ],
                       }),
                     }),
                   ] }),

@@ -158,90 +158,110 @@ class TestCityCodes(unittest.TestCase):
         self.assertEqual(NATIONWIDE, "489")
 
 
-class TestTwoLevelDirection(unittest.TestCase):
+class TestDirectionScoring(unittest.TestCase):
+    """**方向词评分** —— 不分主次，按权重。
+
+    ## 规则变了
+
+    原来是「主攻 30 分 / 次要 15 分」两级。
+    现在改成「**不分主次**」：
+
+    - **有 `direction_weights`** → 命中词的**权重之和** × 10（上限 30）
+    - **没有**（老画像）→ 每个词权重 1.0（命中 1 个 10 分、3 个 30 分）
+
+    **主攻的加成在权重表里**（+1.5）—— 同一张表，不是另一套规则。
+
+    用户诉求：「根据经历内容评定，灵活调整期望方向，**不分主次**」。
+    """
 
     def _job(self, title):
         return {"title": title, "city": "广州", "salary": "8-12K",
                 "description": "", "tags": []}
 
-    def _profile(self, primary=None, secondary=None, skills=None):
-        return {
+    def _profile(self, primary=None, secondary=None, skills=None,
+                 weights=None):
+        prof = {
             "title_keywords_primary": primary or [],
             "title_keywords": secondary or [],
             "skills": skills or [],
             "cities": ["广州"],
             "min_salary": 0,
         }
+        if weights is not None:
+            prof["direction_weights"] = weights
+        return prof
 
-    def test_primary_gets_full_30(self):
+    def test_direction_hit_reported(self):
+        """**命中方向词要说清楚**（给用户看的匹配理由）。"""
         prof = self._profile(primary=["跨境电商运营"],
                               secondary=["结构设计"])
         out = score_job(self._job("跨境电商运营专员"), prof)
-        self.assertTrue(any("主攻方向命中" in r for r in out["reasons"]))
+        self.assertTrue(any("方向命中" in r for r in out["reasons"]), out)
 
-    def test_secondary_only_15_when_primary_set(self):
-        """**填了主攻 → 次要只给 15 分**（主攻要排在前面）。"""
-        prof = self._profile(primary=["跨境电商运营"],
-                              secondary=["结构设计"])
-        out = score_job(self._job("结构设计工程师"), prof)
-        self.assertTrue(any("期望岗位词命中" in r for r in out["reasons"]))
-        self.assertFalse(any("主攻方向命中" in r for r in out["reasons"]))
+    def test_more_specific_hits_score_higher(self):
+        """**命中更多 → 分数更高**（旧规则是固定 15，不变）。
 
-    def test_no_primary_keeps_old_rule(self):
-        """**没填主攻 → 老规则**（每个 +10，最多 30）。
+        「结构设计工程师」命中 3 个词（结构设计/结构/设计）
+        vs 命中 1 个词 → 前者分更高。
+        """
+        job = self._job("结构设计工程师")
+        one = score_job(job, self._profile(secondary=["结构设计"]))["score"]
+        three = score_job(job, self._profile(
+            secondary=["结构设计", "结构", "设计"]))["score"]
+        self.assertGreater(three, one,
+                           "命中更多方向词应该分更高")
 
-        老用户的分数不能整体掉 15 分 ——
-        所以这里对比「填了主攻」和「没填主攻」两种情况：
-        没填主攻时，职位名项要拿满 30 分。
+    def test_weights_drive_score(self):
+        """**权重决定分数** —— 权重高的词命中 → 分更高。"""
+        job = self._job("跨境电商运营专员")
+        strong = score_job(job, self._profile(
+            secondary=["跨境电商运营"],
+            weights={"跨境电商运营": 3.0}))["score"]
+        weak = score_job(job, self._profile(
+            secondary=["跨境电商运营"],
+            weights={"跨境电商运营": 0.5}))["score"]
+        self.assertGreater(strong, weak,
+                           "按经历评定的权重应该影响分数")
+
+    def test_no_primary_secondary_bonus(self):
+        """**没有主攻/次要的差别** —— 两边的分只差「词本身」。
+
+        这是「不分主次」的核心：主攻词和次要词**用同一套规则**，
+        只有权重不同（权重表里体现）。
+        """
+        job = self._job("跨境电商运营专员")
+        as_primary = score_job(job, self._profile(
+            primary=["跨境电商运营"], secondary=["结构设计"]))["score"]
+        as_secondary = score_job(job, self._profile(
+            primary=["结构设计"], secondary=["跨境电商运营"]))["score"]
+        self.assertEqual(as_primary, as_secondary,
+                         "主攻/次要用同一套规则 → 同样命中应该同分")
+
+    def test_old_profile_uses_neutral_weight(self):
+        """**老画像（没权重表）也能打分** —— 每个词算 1.0。
+
+        老用户的分数不能变 0。
         """
         prof = self._profile(secondary=["前端", "web", "three.js"])
         out = score_job(self._job("web前端开发工程师"), prof)
         # 城市命中 = 20 分；职位名项 = 30 分（命中 ≥3 个 → 满）
-        # 分数里职位名那部分要是 30，不能是 15
         self.assertGreaterEqual(out["score"], 50, out)
 
-    def test_secondary_is_fixed_15_when_primary_set(self):
-        """**填了主攻时，次要方向固定 15 分**（不管命中几个词）。
-
-        这样主攻（30 分）和次要（15 分）之间的差距是稳定的，
-        主攻方向一定排在前面。
-        """
-        job = self._job("结构设计工程师")
-        out = score_job(job, self._profile(primary=["跨境电商运营"],
-                                           secondary=["结构设计"]))
-        # 同一个岗位，只改「有没有填主攻」——
-        # 差值就是职位名项的差（次要固定 15 vs 老规则每词 +10）。
-        with_primary = score_job(job, self._profile(
-            primary=["跨境电商运营"], secondary=["结构设计"]))["score"]
-        no_primary = score_job(job, self._profile(
-            secondary=["结构设计"]))["score"]
-        self.assertEqual(with_primary - no_primary, 5,
-                         "次要固定 15 分、老规则 10 分，差应该是 5")
-
-    def test_secondary_fixed_15_regardless_of_hit_count(self):
-        """命中 1 个和命中 3 个，**次要都给 15 分**。"""
-        job = self._job("结构设计工程师")
-        one = score_job(job, self._profile(primary=["跨境电商运营"],
-                                           secondary=["结构设计"]))
-        three = score_job(job, self._profile(primary=["跨境电商运营"],
-                                             secondary=["结构设计", "结构",
-                                                        "设计"]))
-        self.assertEqual(one["score"], three["score"],
-                         "次要方向的给分不该随命中个数变化")
-
-    def test_primary_beats_secondary(self):
-        """**主攻方向的分数要高于也投方向** —— 否则排序没意义。"""
-        prof = self._profile(primary=["跨境电商运营"],
-                              secondary=["结构设计"])
-        primary_score = score_job(self._job("跨境电商运营专员"), prof)["score"]
-        secondary_score = score_job(self._job("结构设计工程师"), prof)["score"]
-        self.assertGreater(primary_score, secondary_score,
-                           "主攻方向分数没有高于也投方向")
+    def test_primary_weight_bonus_in_weights(self):
+        """**主攻方向在权重表里 +1.5** —— 权重制下的唯一「主次」体现。"""
+        from profile_derive import score_direction_weights
+        exps = [{"title": "土建技术员", "company": "某公司",
+                 "bullets": ["参与施工"], "tags": []}]
+        w = score_direction_weights(
+            exps, {"title_keywords_primary": ["跨境电商运营"],
+                   "title_keywords": [], "skills": []})
+        self.assertIn("跨境电商运营", w)
+        self.assertGreaterEqual(w["跨境电商运营"], 1.5)
 
     def test_unmatched_direction_reported(self):
         prof = self._profile(primary=["跨境电商运营"])
         out = score_job(self._job("行政专员"), prof)
-        self.assertIn("职位名未命中期望岗位词", out["missing"])
+        self.assertIn("职位名未命中期望方向词", out["missing"])
 
 
 class TestConfigFallback(unittest.TestCase):
