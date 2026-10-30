@@ -762,7 +762,8 @@ def _sections_for_skeleton(sections):
     return out
 
 
-def render_html(template_id, context, css_override=None, photo=None):
+def render_html(template_id, context, css_override=None, photo=None,
+                skeleton_override=None):
     """渲染一份简历 HTML。
 
     template_id: 内置 id，或用户上传转换出来的模板 id
@@ -771,6 +772,7 @@ def render_html(template_id, context, css_override=None, photo=None):
                   bullets/entries 的项：{text, basis}
     css_override: **直接给 CSS**，跳过「找模板」这一步。
     photo: 证件照的 data URI。None = 用设置页上传的那张；"" = 不要照片。
+    skeleton_override: **直接给骨架 HTML** —— dry_run 预览用（骨架还没落盘）。
 
     ## 为什么需要 css_override
 
@@ -801,7 +803,8 @@ def render_html(template_id, context, css_override=None, photo=None):
     #
     # 用户：「现在有样式了，但与我提供的模板文件完全不同。」
     # → 差别就在这儿：**结构** vs **颜色**。
-    skeleton = _uploaded_skeleton(template_id)
+    # **骨架优先级**：显式传入 > 磁盘上的 > 无（走内置骨架）
+    skeleton = skeleton_override or _uploaded_skeleton(template_id)
 
     ctx = dict(context)
     ctx["style"] = css

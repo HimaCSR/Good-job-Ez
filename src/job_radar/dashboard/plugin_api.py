@@ -46,6 +46,10 @@ _SIBLINGS = (
     "logging_setup", "resume_template", "resume_builder", "resume_store",
     "mock_provider", "apply_gate", "browser_session",
     "template_convert", "template_store", "city_codes",
+    # **模板骨架规格** —— `/templates/slots` 要读写 spec.json
+    # **新增模块必须注册** —— 列表外的 .py 永远不会被 import
+    # → `_sibling("template_slots")` 抛 ImportError → 端点直接 500。
+    "template_slots",
     # **BOSS 城市码表** —— `/cities` 要返回两站并集
     "boss_city_codes",
 )
@@ -861,7 +865,8 @@ def _fetch_jd(job: Dict[str, Any]) -> Dict[str, Any]:
     return job
 
 
-def _render_preview(template_id: str, css_override: str = "") -> str:
+def _render_preview(template_id: str, css_override: str = "",
+                    skeleton_override: str = "") -> str:
     """用用户的真实画像渲染一个模板 → 返回 HTML。失败返回空串。
 
     **内容全部来自用户自己的画像和经历** —— 不编造。
@@ -910,10 +915,56 @@ def _render_preview(template_id: str, css_override: str = "") -> str:
         ctx = {"title": "简历", "identity": identity, "sections": sections}
         return resume_template.render_html(template_id,
                                           dict(ctx, show_basis=False),
-                                          css_override=css_override or None)
+                                          css_override=css_override or None,
+                                          skeleton_override=skeleton_override or None)
     except Exception:
         return ""
 
+
+
+@router.get("/templates/slots")
+def get_template_slots(template_id: str = "") -> Dict[str, Any]:
+    """读一个模板的槽位规格（给前端「编辑槽位」用）。
+
+    返回 {ok, has_slots, edit, roles}
+    - `edit`   —— 当前槽位（姓名 / 联系方式 / 章节）
+    - `roles`  —— 可选的角色列表（姓名 / 联系方式 / 章节标题 / 正文 / 忽略）
+    """
+    try:
+        store = _sibling("template_store")
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    return store.load_slots((template_id or "").strip())
+
+
+@router.post("/templates/slots")
+def edit_template_slots(body: Dict[str, Any]) -> Dict[str, Any]:
+    """保存用户编辑后的槽位 → 重建骨架 → 返回新骨架。
+
+    body: {template_id, edit: {name, fields, sections}}
+
+    ## 为什么要有这个端点
+
+    自动推断**必然有猜错的时候**（「电话：138…」是联系方式还是正文？）。
+    → 让用户在预览里点一下「这段是什么」，**一次确认永久复用**。
+    """
+    template_id = (body.get("template_id") or "").strip()
+    if not template_id:
+        return {"ok": False, "error": "缺少 template_id"}
+    try:
+        store = _sibling("template_store")
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    result = store.save_slots(template_id, body.get("edit") or {})
+    if not result.get("ok"):
+        return result
+    # **顺便重新渲染一份** —— 前端改完直接看效果，不用再点一次预览
+    html = _render_preview(template_id)
+    return {
+        "ok": True,
+        "edit": result.get("edit") or {},
+        "html": html or "",
+    }
 
 @router.post("/templates/preview")
 def preview_template(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -1558,6 +1609,21 @@ def convert_template(body: Dict[str, Any]) -> Dict[str, Any]:
         "css_preview": result.get("css_preview") or "",
     }
 
+    # **槽位规格 + 骨架** —— 前端要用来「点选槽位」。
+    #
+    # **只在 dry_run 时返回** —— 正式落盘时前端不需要再编辑一遍
+    # （用户可能直接点「加入模板库」）。
+    if dry:
+        spec = result.get("spec")
+        out["slots"] = None
+        if spec:
+            try:
+                ts = _sibling("template_slots")
+                out["slots"] = ts.spec_to_edit(spec)
+                out["roles"] = ts.slot_role_labels()
+            except Exception:
+                out["slots"] = None
+
     # **dry_run 时返回渲染好的 HTML 预览** ——
     #
     # 用户反馈：「没有点击简历模板转换按钮，也无法预览所转换模板的样子」。
@@ -1569,7 +1635,8 @@ def convert_template(body: Dict[str, Any]) -> Dict[str, Any]:
     # **dry_run 不落盘** —— 用户不点确认就不会有垃圾模板。
     if dry:
         html = _render_preview(result["template"].get("template_id"),
-                               css_override=result.get("css_preview") or "")
+                               css_override=result.get("css_preview") or "",
+                               skeleton_override=result.get("skeleton") or "")
         if html:
             out["html_preview"] = html
     return out

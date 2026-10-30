@@ -456,12 +456,40 @@ def extract_slots(data, source="pdf"):
     if name_slot:
         name_slot["y"] = _to_top_down(name_slot["y"], page_h)
 
+    # **页眉是不是深色** ——
+    # 从 PDF 版面结构里看「页眉底块」的亮度。
+    # 深底 → 页眉文字要反白；白底 → 用深色字。
+    #
+    # **不能一律反白** —— 白底模板上白字 = 隐形（本机踩过）。
+    header_is_dark = False
+    try:
+        import template_convert as _tc
+        _alphas = _tc._pdf_alpha_map(data)
+        _objs = _tc._pdf_objects(data)
+        _forms = _tc._pdf_forms(data, _objs)
+        _texts, _ = _tc._pdf_streams(data)
+        _content = ""
+        for _t in _texts:
+            if re.search(r"/\S+\s+[\d.]+\s+Tf", _t):
+                _content = _t
+                break
+        if _content:
+            _rects = _tc._pdf_rects(_content, _alphas, _forms)
+            if _rects:
+                _ph = max(r[3] for r in _rects) - min(r[1] for r in _rects)
+                _pw = max(r[2] for r in _rects) - min(r[0] for r in _rects)
+                _lay = _tc._pdf_layout(_rects, _pw, _ph)
+                header_is_dark = bool(_lay.get("_header_is_dark"))
+    except Exception:
+        header_is_dark = False
+
     spec = {
         "version": SPEC_VERSION,
         "source": source,
         "page": {"width": round(page_w, 1), "height": round(page_h, 1)},
         "body_size": body,
-        "head": {"name": name_slot, "fields": fields},
+        "head": {"name": name_slot, "fields": fields,
+                 "header_is_dark": header_is_dark},
         "sections": sections,
     }
     note = ""
@@ -471,6 +499,162 @@ def extract_slots(data, source="pdf"):
         note = "没认出章节标题（字号比正文大、且较短的那些行）。"
     return spec, note
 
+
+# ── 槽位编辑（半自动） ─────────────────────────────────────────────────────
+#
+# **用户选的方案**：解析出骨架后，**在预览里点一下「这段是什么」**，
+# 存进模板。一次确认，永久复用。
+#
+# ## 为什么需要「点选」这一层
+#
+# 自动推断**必然有猜错的时候**：
+# 「电话：1388888888」到底是**联系方式**还是**正文**？
+# 「意向城市：珠海」算**页眉字段**还是**求职意向章节**？
+#
+# 猜错 → 填错位置 → 简历看起来不对，但用户不知道错在哪。
+# → 让用户点一下就解决了 —— **一次确认，永久复用**。
+
+# 可选的槽位角色（前端菜单里列的就是这些）
+ROLES = [
+    {"role": "name", "label": "姓名", "hint": "最大的那行字（页眉）"},
+    {"role": "field", "label": "联系方式", "hint": "电话 / 邮箱 / 性别…"},
+    {"role": "section", "label": "章节标题", "hint": "分段的大标题"},
+    {"role": "body", "label": "正文", "hint": "段落内容"},
+    {"role": "skip", "label": "忽略", "hint": "不管它"},
+]
+
+_ROLE_LABELS = {r["role"]: r["label"] for r in ROLES}
+
+
+def apply_slot_edit(spec, edit):
+    """把用户的点选结果应用到槽位规格。
+
+    ## edit 的形状
+
+    ```json
+    {
+      "name": {"text": "张三"},              // 或 null（取消姓名）
+      "fields": [{"label": "电话", "value": "138..."}],
+      "sections": [{"title": "工作经历", "kind": "entry"}]
+    }
+    ```
+
+    ## 为什么要整体替换而不是「打补丁」
+
+    用户点选是**在完整列表上编辑** —— 删了一个字段、
+    改了一个章节标题。前端传完整列表，后端整体写回。
+    打补丁要处理增删改三种情况，容易出边界 bug。
+
+    ## 字段标签要能映射到 identity 的键
+
+    「电话」→ `phone`。映射不出来的字段**不渲染**（免得出现空标签）。
+    """
+    if not isinstance(spec, dict):
+        return spec
+    spec = dict(spec)
+    head = dict(spec.get("head") or {})
+
+    if "name" in edit:
+        name = edit.get("name")
+        if not name:
+            head["name"] = None
+        else:
+            old = head.get("name") or {}
+            merged = dict(old)
+            merged.update({k: v for k, v in (name or {}).items()
+                           if k in ("text", "size", "color", "x", "y")})
+            head["name"] = merged
+
+    if "fields" in edit:
+        fields = []
+        for f in (edit.get("fields") or []):
+            if not isinstance(f, dict):
+                continue
+            label = str(f.get("label") or "").strip()
+            if not label:
+                continue
+            fields.append({
+                "label": label,
+                "value": str(f.get("value") or ""),
+                "size": f.get("size") or 10,
+                "color": f.get("color") or "#444444",
+            })
+        head["fields"] = fields
+
+    if "sections" in edit:
+        secs = []
+        old_sections = spec.get("sections") or []
+        for idx, sc in enumerate(edit.get("sections") or []):
+            if not isinstance(sc, dict):
+                continue
+            title = str(sc.get("title") or "").strip()
+            if not title:
+                continue
+            kind = sc.get("kind")
+            if kind not in (_KIND_LIST, _KIND_ENTRY, _KIND_PARAGRAPH, _KIND_TAGS):
+                kind = _KIND_PARAGRAPH
+            item = {"title": title, "kind": kind}
+            # **按「位置」找旧章节保留样式** ——
+            # 按标题找的话，用户**改了标题**就找不到旧的了 →
+            # 字号/颜色全丢 → 改完标题，章节大小跟原来不一样。
+            #
+            # 本机踩过：改标题后 size 没了。
+            old = None
+            if idx < len(old_sections):
+                old = old_sections[idx]
+            elif old_sections:
+                # 位置对不上（用户调整了顺序）→ 退回按标题找
+                for o in old_sections:
+                    if o.get("title") == title:
+                        old = o
+                        break
+            if old:
+                if old.get("size") is not None:
+                    item["size"] = old.get("size")
+                if old.get("color") is not None:
+                    item["color"] = old.get("color")
+                if old.get("sample") is not None:
+                    item["sample"] = old.get("sample")
+            secs.append(item)
+        spec["sections"] = secs
+
+    spec["head"] = head
+    spec["edited"] = True
+    return spec
+
+
+def spec_to_edit(spec):
+    """槽位规格 → 前端好编辑的形状。"""
+    spec = spec or {}
+    head = spec.get("head") or {}
+    name = head.get("name") or {}
+    return {
+        "header_is_dark": bool(head.get("header_is_dark")),
+        "name": {
+            "text": name.get("text") or "",
+            "size": name.get("size") or 0,
+            "color": name.get("color") or "",
+        } if name else None,
+        "fields": [{
+            "label": f.get("label") or "",
+            "value": f.get("value") or "",
+            "size": f.get("size") or 0,
+            "color": f.get("color") or "",
+        } for f in (head.get("fields") or [])],
+        "sections": [{
+            "title": s.get("title") or "",
+            "kind": s.get("kind") or _KIND_PARAGRAPH,
+            "size": s.get("size") or 0,
+            "color": s.get("color") or "",
+            "sample": s.get("sample") or [],
+        } for s in (spec.get("sections") or [])],
+    }
+
+
+def slot_role_labels():
+    """前端菜单用的角色列表。"""
+    return [{"role": r["role"], "label": r["label"], "hint": r["hint"]}
+            for r in ROLES]
 
 # ── HTML 生成 ───────────────────────────────────────────────────────────────
 #
@@ -482,11 +666,16 @@ _CSS = """
 .tpl-body { font-family: %(font_family)s; font-size: %(font_size)spx; color: %(text_color)s; }
 .tpl-page { position: relative; width: %(page_width)smm; min-height: %(page_height)smm; margin: 0 auto; }
 .tpl-head { position: relative; margin-bottom: 8mm; %(head_extra)s }
-/* **深色页眉上的字段名/值要反白** ——
+/* **深色页眉上的字段要反白** ——
    PDF 抽出来的 `.contact span` 是深色（#444）→ 深蓝底上**看不清**。
-   本机踩过：页眉最下面一行联系方式糊在深蓝底里。 */
-.tpl-head .tpl-field { color: rgba(255,255,255,.9); }
-.tpl-head .tpl-field b { color: #ffffff; }
+
+   ⚠️ **只能给深色页眉加** —— 白底模板上白字 = **隐形**。
+   本机踩过：稻壳儿（白底）的电话邮箱在 HTML 里但**看不见**。
+   → 靠 `.tpl-head-dark` 类区分，不是一律反白。 */
+.tpl-head-dark .tpl-field { color: rgba(255,255,255,.9); }
+.tpl-head-dark .tpl-field b { color: #ffffff; }
+.tpl-head-dark .tpl-name { color: #ffffff; }
+.tpl-head-dark .tpl-sub { color: rgba(255,255,255,.85); }
 .tpl-name { font-size: %(name_size)spx; font-weight: 700; color: %(name_color)s; line-height: 1.25; }
 .tpl-sub { font-size: %(sub_size)spx; color: %(sub_color)s; margin-top: 2px; }
 .tpl-fields { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 2px 14px; }
@@ -597,7 +786,15 @@ def build_slot_html(spec, style=None):
     page = spec.get("page") or {}
 
     # ── 页眉 ──
-    head_html = ['  <div class="tpl-head">']
+    # **深色页眉要加类名** —— 白底模板不能用白字（隐形）。
+    #
+    # **spec 优先于 style** —— `header_is_dark` 是**从 PDF 版面算出来的**，
+    # 存在 spec 里；style 是「额外传进来的样式参数」。
+    # 只看 style → 重建骨架时忘了传 → 深底模板的字段看不清。
+    head_dark = bool(
+        (spec.get("head") or {}).get("header_is_dark")
+        or style.get("header_is_dark"))
+    head_html = ['  <div class="tpl-head' + (' tpl-head-dark' if head_dark else '') + '">']
     if head.get("photo"):
         head_html.append(
             '    <div class="tpl-photo">{% if photo %}'
@@ -705,14 +902,22 @@ def build_slot_html(spec, style=None):
         "name_color": name.get("color") or style.get("accent_color") or "#2f6fd0",
         "sub_size": _px((name.get("size") or 20) * 0.55),
         "sub_color": "#555555",
-        "field_size": _px(fields[0].get("size") if fields else 10),
-        "field_color": fields[0].get("color") if fields else "#444444",
+        "field_size": _px((fields[0].get("size") or 10) if fields else 10),
+        # **颜色可能是 None** —— `.get("color")` 在键不存在时返回 None，
+        # 直接塞进 CSS 会变成 `color: None` → 浏览器忽略 → 颜色丢失。
+        #
+        # 本机踩过：`.tpl-field { color: None; }` → 联系方式没有颜色。
+        "field_color": (fields[0].get("color") or "#444444") if fields else "#444444",
         "label_color": style.get("accent_color") or "#2f6fd0",
         "photo_w": _num(style.get("photo_w_mm") or 30),
         "photo_h": _num(style.get("photo_h_mm") or 38),
-        "sec_size": _px((sections[0].get("size") if sections else 13)),
-        "sec_color": (sections[0].get("color") if sections
-                      else style.get("accent_color") or "#2f6fd0"),
+        # **size / color 都可能是 None** —— `.get()` 在键不存在时返回 None，
+        # 直接进 CSS 会变成 `font-size: Nonepx` / `color: None`
+        # → 浏览器忽略 → 样式丢失。
+        "sec_size": _px(((sections[0].get("size") or 13) if sections else 13)),
+        "sec_color": ((sections[0].get("color") or style.get("accent_color")
+                       or "#2f6fd0") if sections
+                      else (style.get("accent_color") or "#2f6fd0")),
         "sec_title_extra": style.get("sec_title_extra") or "",
         "body_size": _px(spec.get("body_size") or 10.5),
         "entry_size": _px((spec.get("body_size") or 10.5) * 1.15),

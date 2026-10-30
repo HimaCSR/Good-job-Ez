@@ -19,6 +19,7 @@
 
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -285,6 +286,219 @@ class TestAlignment(unittest.TestCase):
         self.assertTrue(out[0]["paragraphs"], "求职意向没填：%r" % out)
         self.assertIn("前端工程师", " ".join(out[0]["paragraphs"]))
 
+
+
+class TestSlotEditing(unittest.TestCase):
+    """**槽位编辑**（半自动点选）。"""
+
+    def _spec(self):
+        return {
+            "version": 1, "source": "pdf",
+            "page": {"width": 595, "height": 842}, "body_size": 10.5,
+            "head": {
+                "name": {"text": "张三", "size": 26, "color": "#4066b0"},
+                "fields": [{"label": "电话", "value": "138", "size": 10,
+                            "color": "#666"}],
+            },
+            "sections": [{"title": "工作经历", "kind": "entry", "size": 14,
+                          "color": "#4066b0", "sample": ["某公司"]}],
+        }
+
+    def test_edit_name(self):
+        """**改姓名** —— 文本和样式都改。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(
+            self._spec(), {"name": {"text": "李四"}})
+        self.assertEqual(spec["head"]["name"]["text"], "李四")
+        # **样式要保留** —— 改文本不该把字号颜色丢了
+        self.assertEqual(spec["head"]["name"]["size"], 26)
+
+    def test_clear_name(self):
+        """**清空姓名** —— 传 null 就没姓名了。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(self._spec(), {"name": None})
+        self.assertIsNone(spec["head"]["name"])
+
+    def test_edit_fields(self):
+        """**改联系方式** —— 整体替换前端传来的列表。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(self._spec(), {"fields": [
+            {"label": "手机", "value": "139"},
+            {"label": "城市", "value": "重庆"},
+        ]})
+        labels = [f["label"] for f in spec["head"]["fields"]]
+        self.assertEqual(labels, ["手机", "城市"])
+
+    def test_drop_field(self):
+        """**删字段** —— 前端传少了就是少了。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(self._spec(), {"fields": []})
+        self.assertEqual(spec["head"]["fields"], [])
+
+    def test_edit_section_title(self):
+        """**改章节标题** —— 用户想改就改。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(
+            self._spec(), {"sections": [{"title": "职业经历", "kind": "entry"}]})
+        self.assertEqual(spec["sections"][0]["title"], "职业经历")
+        # **样式保留**
+        self.assertEqual(spec["sections"][0]["size"], 14)
+
+    def test_section_kind_validated(self):
+        """**章节类型要校验** —— 非法值退回段落。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(
+            self._spec(), {"sections": [{"title": "X", "kind": "乱写"}]})
+        self.assertEqual(spec["sections"][0]["kind"], "paragraph")
+
+    def test_marked_as_edited(self):
+        """**编辑过的规格要打标记** —— 知道它跟自动猜的不一样。"""
+        import template_slots
+        spec = template_slots.apply_slot_edit(self._spec(), {"name": {"text": "X"}})
+        self.assertTrue(spec.get("edited"))
+
+    def test_spec_to_edit_roundtrip(self):
+        """**规格 → 编辑形状 → 规格** 要能转回来。"""
+        import template_slots
+        spec = self._spec()
+        edit = template_slots.spec_to_edit(spec)
+        self.assertEqual(edit["name"]["text"], "张三")
+        self.assertEqual(edit["fields"][0]["label"], "电话")
+        self.assertEqual(edit["sections"][0]["title"], "工作经历")
+        again = template_slots.apply_slot_edit(spec, edit)
+        self.assertEqual(again["head"]["name"]["text"], "张三")
+
+    def test_roles_available(self):
+        """**角色列表要给前端** —— 菜单里显示什么。"""
+        import template_slots
+        roles = template_slots.slot_role_labels()
+        labels = [r["label"] for r in roles]
+        self.assertIn("姓名", labels)
+        self.assertIn("联系方式", labels)
+        self.assertIn("章节标题", labels)
+
+    def test_rebuild_skeleton_after_edit(self):
+        """**改了槽位要重建骨架** —— 否则改了不生效。
+
+        章节标题是**生成进骨架**的 —— 改了规格不改骨架，
+        渲染出来还是旧标题。
+        """
+        import template_slots
+        spec = template_slots.apply_slot_edit(
+            self._spec(), {"sections": [{"title": "职业经历", "kind": "entry"}]})
+        html = template_slots.build_slot_html(spec, {})
+        # 骨架里的章节标题是**占位符**（运行时才填）
+        self.assertIn("{{ sec.title }}", html)
+
+
+    def test_light_header_keeps_dark_text(self):
+        """**白底页眉不能用白字** —— 隐形。
+
+        本机踩过：为了修「深蓝页眉上联系方式看不清」，
+        一律给页眉加白字 → **白底模板的电话邮箱看不见**
+        （HTML 里有，屏幕上没有）。
+
+        → 反白规则要限定在 `.tpl-head-dark` 上。
+        """
+        import template_slots
+        spec = {
+            "version": 1, "source": "pdf",
+            "page": {"width": 595, "height": 842}, "body_size": 10.5,
+            "head": {"name": {"text": "张三", "size": 26},
+                     "fields": [{"label": "电话", "value": "138", "size": 10}],
+                     "header_is_dark": False},
+            "sections": [],
+        }
+        html = template_slots.build_slot_html(spec, {})
+        # **查元素上的类** —— CSS 规则文本里本来就有 `.tpl-head-dark`
+        # （那是「深底时怎么反白」的规则，白底时也要留着）。
+        import re
+        m = re.search(r'<div class="([^"]*tpl-head[^"]*)"', html)
+        self.assertIsNotNone(m, "没有页眉元素")
+        self.assertNotIn("tpl-head-dark", m.group(1),
+                         "白底页眉加了 dark 类 → 字段变白字 → 隐形")
+
+    def test_dark_header_gets_dark_class(self):
+        """**深底页眉要加 dark 类** —— 字段才看得清。"""
+        import template_slots
+        spec = {
+            "version": 1, "source": "pdf",
+            "page": {"width": 595, "height": 842}, "body_size": 10.5,
+            "head": {"name": {"text": "张三", "size": 26},
+                     "fields": [{"label": "电话", "value": "138", "size": 10}],
+                     "header_is_dark": True},
+            "sections": [],
+        }
+        html = template_slots.build_slot_html(spec, {})
+        import re
+        m = re.search(r'<div class="([^"]*tpl-head[^"]*)"', html)
+        self.assertIsNotNone(m, "没有页眉元素")
+        self.assertIn("tpl-head-dark", m.group(1), "深底页眉没加 dark 类")
+
+class TestTemplateStoreSlots(unittest.TestCase):
+    """`template_store` 的槽位读写。"""
+
+    def setUp(self):
+        import template_store
+        import resume_template
+        self.store = template_store
+        self.tdir = os.path.join(
+            os.environ.get("LOCALAPPDATA", tempfile.gettempdir()),
+            "hermes", "plugin-data", "job-radar", "templates")
+        os.makedirs(self.tdir, exist_ok=True)
+        self.tid = "test-slots-tpl"
+        self.spec_path = os.path.join(self.tdir, self.tid + ".spec.json")
+        self.sk_path = os.path.join(self.tdir, self.tid + ".skeleton.html")
+        self.css_path = os.path.join(self.tdir, self.tid + ".css")
+        import json
+        with open(self.spec_path, "w", encoding="utf-8") as fh:
+            json.dump({
+                "version": 1, "source": "pdf",
+                "page": {"width": 595, "height": 842}, "body_size": 10.5,
+                "head": {"name": {"text": "张三", "size": 26},
+                         "fields": [{"label": "电话", "value": "138"}]},
+                "sections": [{"title": "工作经历", "kind": "entry"}],
+            }, fh, ensure_ascii=False)
+        with open(self.css_path, "w", encoding="utf-8") as fh:
+            fh.write(".tpl-name { color: #4066b0; }")
+        self._orig_dir = resume_template.TEMPLATES_DIR
+        resume_template.TEMPLATES_DIR = self.tdir
+
+    def tearDown(self):
+        import resume_template
+        resume_template.TEMPLATES_DIR = self._orig_dir
+        for p in (self.spec_path, self.sk_path):
+            if os.path.exists(p):
+                os.remove(p)
+
+    def test_save_slots_writes_back(self):
+        """**保存槽位要落盘** —— spec + 骨架都写。"""
+        r = self.store.save_slots(self.tid, {
+            "name": {"text": "李四"},
+            "sections": [{"title": "职业经历", "kind": "entry"}],
+        })
+        self.assertTrue(r.get("ok"), r.get("error"))
+        self.assertTrue(os.path.exists(self.spec_path))
+        self.assertTrue(os.path.exists(self.sk_path))
+        import json
+        with open(self.spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        self.assertEqual(spec["head"]["name"]["text"], "李四")
+        self.assertEqual(spec["sections"][0]["title"], "职业经历")
+
+    def test_load_slots(self):
+        """**读槽位** —— 给前端编辑用。"""
+        r = self.store.load_slots(self.tid)
+        self.assertTrue(r.get("ok"))
+        self.assertTrue(r.get("has_slots"))
+        self.assertEqual(r["edit"]["name"]["text"], "张三")
+        self.assertTrue(r.get("roles"))
+
+    def test_load_slots_missing(self):
+        """**没规格的模板** —— 如实说没有，不报错。"""
+        r = self.store.load_slots("no-such-template-xyz")
+        self.assertFalse(r.get("ok"))
+        self.assertFalse(r.get("has_slots"))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

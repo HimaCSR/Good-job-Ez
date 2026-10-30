@@ -106,7 +106,31 @@ def save_upload(filename, data_base64, kind=None, name=None,
 
     if dry_run:
         info["_dry_run"] = True
+        # **dry_run 也要抽骨架** —— 预览要显示**模板自己的结构**，
+        # 不能用内置骨架预览（那是「个人简介/工作经历」，不是模板的章节）。
+        spec = None
+        skeleton = ""
+        if ext == "pdf":
+            try:
+                import template_slots
+                spec, _n = template_slots.extract_slots(raw, "pdf")
+                if spec:
+                    import template_convert as _tc
+                    _css, _params = _tc._pdf_to_css(raw)
+                    skeleton = template_slots.build_slot_html(spec, {
+                        "font_family": _params.get("font_family"),
+                        "text_color": "#333333",
+                        "page_width_mm": _params.get("page_width_mm"),
+                        "page_height_mm": _params.get("page_height_mm"),
+                        "accent_color": _params.get("accent_color"),
+                        "title_color": _params.get("title_color"),
+                        "extra_css": _css,
+                    })
+            except Exception:      # noqa: BLE001
+                spec = None
+                skeleton = ""
         return {"ok": True, "template": info,
+                "spec": spec, "skeleton": skeleton,
                 "extracted": result.get("extracted") or [],
                 "note": result.get("note") or "",
                 "css_preview": result.get("css") or ""}
@@ -150,6 +174,10 @@ def save_upload(filename, data_base64, kind=None, name=None,
                     "accent_color": _params.get("accent_color"),
                     "title_color": _params.get("title_color"),
                     "extra_css": _css,
+                    # **页眉是不是深色** —— 决定页眉文字要不要反白。
+                    # 白底模板用白字 = 隐形（本机踩过：稻壳儿的电话邮箱看不见）。
+                    "header_is_dark": bool(
+                        (spec.get("head") or {}).get("header_is_dark")),
                 }
                 skeleton = template_slots.build_slot_html(spec, style)
         except Exception as e:      # noqa: BLE001
@@ -218,3 +246,113 @@ def remove_upload(template_id):
         pass
 
     return {"ok": True, "removed": removed}
+
+def save_slots(template_id, edit):
+    """保存用户编辑后的槽位 → 重建骨架 → 返回新骨架 HTML。
+
+    ## 为什么「编辑后要重建骨架」
+
+    骨架 HTML 里**章节标题是按模板的章节列表生成的**
+    （求职意向/自我评价/实习经历…），字段标签也是。
+    改了槽位 → 骨架要跟着重生成，否则改了也不生效。
+
+    ## 为什么不重新转换
+
+    **原始文件可能已经不在了**（用户上传完就删了），
+    而且重新转换会把用户的编辑覆盖掉。
+    → 只改 spec + 重建骨架，CSS 保持不变。
+
+    返回 {"ok": True, "spec": ..., "skeleton": html}
+    """
+    import json
+    import os
+
+    if not template_id:
+        return {"ok": False, "error": "缺少 template_id"}
+    templates_dir = resume_template.TEMPLATES_DIR
+    spec_path = os.path.join(templates_dir, template_id + ".spec.json")
+    css_path = os.path.join(templates_dir, template_id + ".css")
+
+    spec = None
+    try:
+        with open(spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        spec = None
+    if not spec:
+        return {"ok": False, "error": "这个模板没有骨架规格（不是 PDF 模板？）"}
+
+    try:
+        import template_slots
+    except ImportError:
+        import template_slots
+
+    try:
+        spec = template_slots.apply_slot_edit(spec, edit or {})
+    except Exception as e:      # noqa: BLE001
+        return {"ok": False, "error": "槽位编辑失败：%s" % e}
+
+    # ── 重建骨架 ──
+    css = ""
+    try:
+        with open(css_path, encoding="utf-8") as fh:
+            css = fh.read()
+    except OSError:
+        css = ""
+    style = {
+        "extra_css": css,
+        "text_color": "#333333",
+        # **页眉深浅要跟着规格走** —— 否则重建骨架后反白规则丢了
+        # → 深底白底判断错 → 白底模板的字段隐形。
+        "header_is_dark": bool((spec.get("head") or {}).get("header_is_dark")),
+    }
+    try:
+        skeleton = template_slots.build_slot_html(spec, style)
+    except Exception as e:      # noqa: BLE001
+        return {"ok": False, "error": "重建骨架失败：%s" % e}
+
+    # ── 落盘 ──
+    try:
+        with open(spec_path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump(spec, fh, ensure_ascii=False, indent=2)
+    except OSError as e:
+        return {"ok": False, "error": "写槽位规格失败：%s" % e}
+    sk_path = os.path.join(templates_dir, template_id + ".skeleton.html")
+    try:
+        with open(sk_path, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(skeleton)
+    except OSError as e:
+        return {"ok": False, "error": "写骨架失败：%s" % e}
+
+    return {
+        "ok": True,
+        "spec": spec,
+        "skeleton": skeleton,
+        "edit": template_slots.spec_to_edit(spec),
+    }
+
+
+def load_slots(template_id):
+    """读一个模板的槽位规格（给前端编辑用）。"""
+    import json
+    import os
+
+    if not template_id:
+        return {"ok": False, "error": "缺少 template_id"}
+    templates_dir = resume_template.TEMPLATES_DIR
+    spec_path = os.path.join(templates_dir, template_id + ".spec.json")
+    try:
+        with open(spec_path, encoding="utf-8") as fh:
+            spec = json.load(fh)
+    except (OSError, ValueError):
+        return {"ok": False, "error": "没有槽位规格", "has_slots": False}
+    try:
+        import template_slots
+    except ImportError:
+        import template_slots
+    return {
+        "ok": True,
+        "has_slots": True,
+        "edit": template_slots.spec_to_edit(spec),
+        "roles": template_slots.slot_role_labels(),
+    }

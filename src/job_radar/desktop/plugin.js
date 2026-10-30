@@ -704,6 +704,70 @@ function ProfileView({ ctx, cfg, onSaved }) {
                 placeholder: 'you@example.com',
               }),
             }),
+            // ── 模板要用的字段 ──
+            //
+            // **为什么加这几个** —— 简历模板（尤其 WPS 系的）
+            // 页眉上常有「意向岗位 / 意向城市 / 期望薪资 / 求职类型 /
+            // 性别 / 年龄」。表单里没有 → **模板渲染时这些字段全空**
+            // → 用户看到「模板上有位置，我的怎么没有」。
+            //
+            // 本机踩过：现场管理模板有 5 个页眉字段，用户画像一个都没有
+            // → 页眉只剩姓名。
+            jsx(Field, {
+              label: '意向岗位',
+              children: jsx(Input, {
+                value: identity.headline || '',
+                onChange: (e) => setIdentity('headline', e.target.value),
+                placeholder: '跨境电商运营',
+              }),
+            }),
+            jsx(Field, {
+              label: '意向城市',
+              children: jsx(Input, {
+                value: identity.location || '',
+                onChange: (e) => setIdentity('location', e.target.value),
+                placeholder: '重庆',
+              }),
+            }),
+            jsx(Field, {
+              label: '期望薪资',
+              children: jsx(Input, {
+                value: identity.salary || '',
+                onChange: (e) => setIdentity('salary', e.target.value),
+                placeholder: '9k-13k',
+              }),
+            }),
+            jsx(Field, {
+              label: '求职类型',
+              children: jsx('select', {
+                className: 'h-8 w-full rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 text-sm outline-none focus:border-(--ui-accent)',
+                value: identity.job_type || '社招',
+                onChange: (e) => setIdentity('job_type', e.target.value),
+                children: ['社招', '校招', '实习', '应届'].map((t) =>
+                  jsx('option', { key: t, value: t, children: t })),
+              }),
+            }),
+            jsx(Field, {
+              label: '性别',
+              children: jsx('select', {
+                className: 'h-8 w-full rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 text-sm outline-none focus:border-(--ui-accent)',
+                value: identity.gender || '',
+                onChange: (e) => setIdentity('gender', e.target.value),
+                children: [
+                  jsx('option', { key: '_', value: '', children: '不填' }),
+                  jsx('option', { key: 'm', value: '男', children: '男' }),
+                  jsx('option', { key: 'f', value: '女', children: '女' }),
+                ],
+              }),
+            }),
+            jsx(Field, {
+              label: '年龄',
+              children: jsx(Input, {
+                value: identity.age || '',
+                onChange: (e) => setIdentity('age', e.target.value),
+                placeholder: '25',
+              }),
+            }),
             jsx(Field, {
               label: '最高学历',
               children: jsx('select', {
@@ -1310,15 +1374,31 @@ function ResumeOptimizeDialog({ job, ctx, onClose }) {
               jsx('div', { className: 'text-sm font-medium', children: '简历匹配优化' }),
               jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: job.title || '' }),
             ]}),
-            jsx('button', {
-              type: 'button',
-              onClick: onClose,
-              className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
-              children: '关闭',
+            jsxs('div', {
+              className: 'flex items-center gap-3',
+              children: [
+                // **「编辑槽位」** —— 转换时猜错了可以改。
+                //
+                // 只给**有槽位的模板**（PDF 转换来的）显示 ——
+                // 内置模板没有 spec.json，给个点进去是空的入口更糟。
+                jsx('button', {
+                  type: 'button',
+                  onClick: loadSlots,
+                  className: 'rounded border border-(--ui-stroke-tertiary) px-2 py-1 text-xs text-(--ui-text-secondary) hover:text-(--ui-text-primary)',
+                  children: '编辑槽位',
+                }),
+                jsx('button', {
+                  type: 'button',
+                  onClick: onClose,
+                  className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+                  children: '关闭',
+                }),
+              ],
             }),
           ],
         }),
-        jsxs('div', { className: 'flex flex-col gap-3 overflow-auto p-4', children: [
+        jsxs('div', { className: cn('flex flex-col gap-3 overflow-auto p-4',
+          editing && 'hidden'), children: [
           jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
             jsx('span', { className: 'text-xs text-(--ui-text-secondary)', children: '模板' }),
             ...['classic', 'modern', 'tech', 'acad'].map((id) => jsx('button', {
@@ -2838,6 +2918,9 @@ function ConvertConfirmDialog({ items, committing, onCommit, onClose }) {
  */
 function TemplatePreviewDialog({ tpl, ctx, onClose }) {
   const [state, setState] = React.useState({ phase: 'loading' })
+  // **切到槽位编辑器** —— 用户说「这段认错了」时改。
+  const [editing, setEditing] = React.useState(false)
+  const [slots, setSlots] = React.useState(null)
 
   React.useEffect(() => {
     let alive = true
@@ -2859,6 +2942,24 @@ function TemplatePreviewDialog({ tpl, ctx, onClose }) {
     })()
     return () => { alive = false }
   }, [tpl.template_id, ctx])
+
+  // **拉一次槽位** —— 「编辑槽位」按钮要知道有没有槽位可编辑。
+  //
+  // **PDF 模板才有槽位**（内置模板没有 spec.json）→ 返回 has_slots=false
+  // → 按钮不显示，不给用户一个点进去是空的入口。
+  const loadSlots = async () => {
+    try {
+      const r = await ctx.rest('/templates/slots?template_id=' + encodeURIComponent(tpl.template_id))
+      if (r && r.ok && r.has_slots) {
+        setSlots(r)
+        setEditing(true)
+      } else {
+        setState({ phase: 'done', html: state.html })
+      }
+    } catch (e) {
+      setState({ phase: 'done', html: state.html })
+    }
+  }
 
   return jsx('div', {
     className: cn(
@@ -2905,8 +3006,276 @@ function TemplatePreviewDialog({ tpl, ctx, onClose }) {
               })
             : null,
         ]}),
+        // **槽位编辑器** —— 覆盖在预览上面。
+        //
+        // 编辑器自己渲染一份预览（右栏）→ 不用两层叠。
+        editing && slots ? jsx(SlotEditor, {
+          templateId: tpl.template_id,
+          slots: slots.edit || { name: null, fields: [], sections: [] },
+          roles: slots.roles || [],
+          ctx,
+          onSaved: () => { setEditing(false) },
+          onCancel: () => { setEditing(false) },
+        }) : null,
       ],
     }),
+  })
+}
+
+
+/**
+ * 槽位编辑器 —— 半自动地把模板的「示例内容」对应到个人信息。
+ *
+ * ## 为什么需要它
+ *
+ * 模板转换时会**猜**每个文字块是什么（姓名 / 联系方式 / 章节标题 / 正文）。
+ * 猜**必然有错的时候** —— 「电话：1388888888」是联系方式还是正文？
+ * 「意向城市：珠海」算页眉字段还是求职意向章节？
+ *
+ * 猜错 → 内容填错位置 → 简历不对，**但用户不知道错在哪**。
+ *
+ * → 让用户**点一下「这段是什么」**，改完存进模板。**一次确认，永久复用。**
+ *
+ * ## 交互
+ *
+ * 左边是槽位列表（姓名 / 联系方式 / 章节），右边是预览。
+ * 改左边 → 右边立刻重渲染（走 `/templates/slots`）。
+ *
+ * ## 为什么用受控输入而不是 window.prompt
+ *
+ * `window.prompt` 在 Electron 里**静默无效**（本项目踩过）——
+ * 点了没反应，用户以为功能坏了。
+ * → 一律用内联受控输入。
+ */
+function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
+  const [edit, setEdit] = React.useState(slots || { name: null, fields: [], sections: [] })
+  const [html, setHtml] = React.useState('')
+  const [busy, setBusy] = React.useState(false)
+  const [msg, setMsg] = React.useState('')
+
+  // **改了就重新渲染** —— 每改一下就调一次后端。
+  //
+  // 为什么不在前端拼 HTML —— 骨架是后端生成的（章节类型转换、
+  // 字段标签映射都在后端），前端拼会分家。
+  React.useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await ctx.rest('/templates/slots', {
+          method: 'POST',
+          body: { template_id: templateId, edit },
+        })
+        if (!alive) return
+        if (!r || r.ok === false) {
+          setMsg((r && r.error) || '保存失败')
+          return
+        }
+        setHtml(r.html || '')
+        setMsg('')
+      } catch (e) {
+        if (alive) setMsg(String((e && e.message) || e))
+      }
+    })()
+    return () => { alive = false }
+  }, [templateId, JSON.stringify(edit)])
+
+  const setName = (patch) => setEdit((old) => ({
+    ...old,
+    name: old.name ? { ...old.name, ...patch } : patch,
+  }))
+
+  const setField = (i, patch) => setEdit((old) => {
+    const fields = (old.fields || []).slice()
+    fields[i] = { ...fields[i], ...patch }
+    return { ...old, fields }
+  })
+
+  const removeField = (i) => setEdit((old) => {
+    const fields = (old.fields || []).slice()
+    fields.splice(i, 1)
+    return { ...old, fields }
+  })
+
+  const setSection = (i, patch) => setEdit((old) => {
+    const sections = (old.sections || []).slice()
+    sections[i] = { ...sections[i], ...patch }
+    return { ...old, sections }
+  })
+
+  const removeSection = (i) => setEdit((old) => {
+    const sections = (old.sections || []).slice()
+    sections.splice(i, 1)
+    return { ...old, sections }
+  })
+
+  const addSection = () => setEdit((old) => ({
+    ...old,
+    sections: (old.sections || []).concat([{ title: '新章节', kind: 'paragraph' }]),
+  }))
+
+  return jsxs('div', {
+    className: cn('flex max-h-[80vh] w-full max-w-5xl flex-col overflow-hidden',
+      'rounded-xl border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor)'),
+    children: [
+      jsxs('div', {
+        className: 'flex items-center justify-between border-b border-(--ui-stroke-tertiary) px-4 py-3',
+        children: [
+          jsxs('div', { children: [
+            jsx('div', { className: 'text-sm font-medium', children: '编辑模板槽位' }),
+            jsx('div', {
+              className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+              children: '左边改槽位，右边实时预览。改完点「保存槽位」。',
+            }),
+          ]}),
+          jsx('button', {
+            type: 'button',
+            onClick: onCancel,
+            className: 'text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+            children: '关闭',
+          }),
+        ],
+      }),
+      jsxs('div', {
+        className: 'grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-4 overflow-hidden p-4',
+        children: [
+          // ── 左：槽位列表 ──
+          jsxs('div', {
+            className: 'flex min-h-0 flex-col gap-3 overflow-auto pr-1',
+            children: [
+              // 姓名
+              jsxs('div', {
+                className: 'rounded-md border border-(--ui-stroke-tertiary) p-3',
+                children: [
+                  jsx('div', { className: 'mb-2 text-xs font-medium text-(--ui-text-secondary)', children: '姓名' }),
+                  jsx(Input, {
+                    value: (edit.name && edit.name.text) || '',
+                    placeholder: '模板里的姓名（不填就不显示）',
+                    onChange: (e) => setName({ text: e && e.target ? e.target.value : '' }),
+                  }),
+                ],
+              }),
+              // 联系方式
+              jsxs('div', {
+                className: 'rounded-md border border-(--ui-stroke-tertiary) p-3',
+                children: [
+                  jsx('div', { className: 'mb-2 text-xs font-medium text-(--ui-text-secondary)', children: '联系方式' }),
+                  (edit.fields || []).length === 0
+                    ? jsx('div', { className: 'text-[0.6875rem] text-(--ui-text-tertiary)', children: '没识别到联系方式字段' })
+                    : null,
+                  ...(edit.fields || []).map((f, i) => jsxs('div', {
+                    key: 'f' + i,
+                    className: 'mb-2 flex items-center gap-1.5',
+                    children: [
+                      jsx(Input, {
+                        className: 'w-20 shrink-0',
+                        value: f.label || '',
+                        placeholder: '标签',
+                        onChange: (e) => setField(i, { label: e && e.target ? e.target.value : '' }),
+                      }),
+                      jsx(Input, {
+                        className: 'min-w-0 flex-1',
+                        value: f.value || '',
+                        placeholder: '示例值',
+                        onChange: (e) => setField(i, { value: e && e.target ? e.target.value : '' }),
+                      }),
+                      jsx('button', {
+                        type: 'button',
+                        onClick: () => removeField(i),
+                        title: '删掉这个字段',
+                        className: 'shrink-0 rounded px-1.5 text-xs text-(--ui-text-tertiary) hover:text-(--ui-red)',
+                        children: '×',
+                      }),
+                    ],
+                  })),
+                ],
+              }),
+              // 章节
+              jsxs('div', {
+                className: 'rounded-md border border-(--ui-stroke-tertiary) p-3',
+                children: [
+                  jsxs('div', {
+                    className: 'mb-2 flex items-center justify-between',
+                    children: [
+                      jsx('div', { className: 'text-xs font-medium text-(--ui-text-secondary)', children: '章节' }),
+                      jsx('button', {
+                        type: 'button',
+                        onClick: addSection,
+                        className: 'rounded border border-(--ui-stroke-tertiary) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+                        children: '＋ 加一个',
+                      }),
+                    ],
+                  }),
+                  ...(edit.sections || []).map((sc, i) => jsxs('div', {
+                    key: 's' + i,
+                    className: 'mb-2 flex items-center gap-1.5',
+                    children: [
+                      jsx(Input, {
+                        className: 'min-w-0 flex-1',
+                        value: sc.title || '',
+                        placeholder: '章节标题',
+                        onChange: (e) => setSection(i, { title: e && e.target ? e.target.value : '' }),
+                      }),
+                      jsx('select', {
+                        className: 'shrink-0 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-1 text-xs',
+                        value: sc.kind || 'paragraph',
+                        onChange: (e) => setSection(i, { kind: e && e.target ? e.target.value : 'paragraph' }),
+                        children: [
+                          jsx('option', { value: 'paragraph', children: '段落' }),
+                          jsx('option', { value: 'list', children: '列表' }),
+                          jsx('option', { value: 'entry', children: '条目' }),
+                          jsx('option', { value: 'tags', children: '标签' }),
+                        ],
+                      }),
+                      jsx('button', {
+                        type: 'button',
+                        onClick: () => removeSection(i),
+                        title: '删掉这个章节',
+                        className: 'shrink-0 rounded px-1.5 text-xs text-(--ui-text-tertiary) hover:text-(--ui-red)',
+                        children: '×',
+                      }),
+                    ],
+                  })),
+                ],
+              }),
+            ],
+          }),
+          // ── 右：实时预览 ──
+          jsxs('div', {
+            className: 'flex min-h-0 flex-col gap-2',
+            children: [
+              jsx('div', {
+                className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+                children: msg ? ('⚠ ' + msg) : '实时预览',
+              }),
+              jsx('div', {
+                className: cn('min-h-0 flex-1 overflow-auto rounded-md border border-(--ui-stroke-tertiary)',
+                  'bg-white p-6'),
+                dangerouslySetInnerHTML: { __html: html || '' },
+              }),
+            ],
+          }),
+        ],
+      }),
+      jsxs('div', {
+        className: 'flex items-center justify-end gap-2 border-t border-(--ui-stroke-tertiary) px-4 py-3',
+        children: [
+          jsx('button', {
+            type: 'button',
+            onClick: onCancel,
+            className: 'rounded px-3 py-1.5 text-xs text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+            children: '取消',
+          }),
+          jsx('button', {
+            type: 'button',
+            disabled: busy,
+            onClick: () => { setBusy(true); onSaved && onSaved(); setBusy(false) },
+            className: cn('rounded-md border border-(--ui-accent) px-3 py-1.5 text-xs',
+              'text-(--ui-text-primary) disabled:opacity-50'),
+            children: busy ? '保存中…' : '保存槽位',
+          }),
+        ],
+      }),
+    ],
   })
 }
 
