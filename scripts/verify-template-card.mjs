@@ -111,7 +111,7 @@ async function loadPlugin(sdk) {
   code = code.replace(/^import[\s\S]*?from\s+['"][^'"]+['"];?\s*$/gm, '')
   code = code.replace(/^export default /m, 'const __default_export = ')
   const tmp = path.join(os.tmpdir(), `jr-tplcard-${process.pid}.mjs`)
-  fs.writeFileSync(tmp, stubSrc + '\n' + code + '\nexport { TemplateCard };\n', 'utf8')
+  fs.writeFileSync(tmp, stubSrc + '\n' + code + '\nexport { TemplateCard, SlotEditor };\n', 'utf8')
   globalThis.__SDK__ = sdk
   const mod = await import(pathToFileURL(tmp).href)
   return { mod, tmp }
@@ -195,6 +195,74 @@ async function main() {
     }))
   })
   check('没有 format 时有兜底角标', texts().length > 0, texts().join(','))
+
+  // ── 「编辑槽位」按钮 ──
+  //
+  // 用户反馈：「模板库没有编辑槽位的功能」。
+  //
+  // **必须真渲染验证** —— 之前只放在**预览弹窗**里，
+  // 用户在模板库这一层看不到 → 反馈「没有这个功能」。
+  // → 现在**卡片上直接有按钮**（hover 出现）。
+  //
+  // 断言点：
+  //   ① 上传模板且传了 onEditSlots → 按钮在 DOM 里
+  //   ② 没传 onEditSlots → 按钮不在（内置模板不该有）
+  await act(async () => {
+    root.render(React.createElement(mod.TemplateCard, {
+      tpl: { template_id: 'u', name: '我的模板', builtin: false, format: 'pdf' },
+      active: false, onToggle: () => {}, onDelete: () => {},
+      onEditSlots: () => {},
+    }))
+  })
+  check('上传模板卡片上有「槽位」按钮', texts().includes('槽位'), texts().join(','))
+
+  await act(async () => {
+    root.render(React.createElement(mod.TemplateCard, {
+      tpl: { template_id: 'u', name: '我的模板', builtin: false, format: 'pdf' },
+      active: false, onToggle: () => {}, onDelete: () => {},
+    }))
+  })
+  check('没给 onEditSlots 时不渲染「槽位」按钮',
+    !texts().includes('槽位'), texts().join(','))
+
+  // ── SlotEditor 组件能渲染 ──
+  //
+  // 编辑器是自己的一层 UI，渲染崩了整页都崩。
+  let slotCrashed = null
+  try {
+    await act(async () => {
+      root.render(React.createElement(mod.SlotEditor, {
+        templateId: 'u',
+        slots: {
+          name: { text: '张三', size: 26, color: '#4066b0' },
+          fields: [{ label: '电话', value: '138', size: 10, color: '#666' }],
+          sections: [{ title: '工作经历', kind: 'entry', size: 14 }],
+        },
+        roles: [{ role: 'name', label: '姓名' }],
+        ctx: { rest: async () => ({ ok: true, html: '<p>预览</p>' }) },
+        onSaved: () => {},
+        onCancel: () => {},
+      }))
+    })
+  } catch (e) {
+    slotCrashed = e
+  }
+  check('SlotEditor 渲染不崩', !slotCrashed,
+    slotCrashed ? String(slotCrashed.message || slotCrashed) : '')
+  // **输入框的值查不到** —— SDK 的 `Input` 在这个 stub 里是字符串
+  // `'input'`（不是真组件），jsdom 不会把 `value` 渲染成文本。
+  // → 查 **placeholder**（它是 DOM 属性）。
+  const placeholders = Array.from(container.querySelectorAll('input'))
+    .map((el) => el.getAttribute('placeholder') || '')
+  check('SlotEditor 有姓名输入框',
+    placeholders.some((x) => x.includes('姓名')), placeholders.join(','))
+  check('SlotEditor 有章节标题输入框',
+    placeholders.some((x) => x.includes('章节标题')), placeholders.join(','))
+  check('SlotEditor 有标签输入框',
+    placeholders.some((x) => x.includes('标签')), placeholders.join(','))
+  // **章节标题的值也查不到** —— 同上，`value` 在 stub 里不是 DOM 文本。
+  // → 「章节」这个分组标题够证明列表渲染了。
+  check('SlotEditor 显示章节分组', texts().includes('章节'), texts().join(','))
 
   fs.unlinkSync(tmp)
   console.log('='.repeat(62))

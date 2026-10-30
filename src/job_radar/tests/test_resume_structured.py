@@ -291,5 +291,116 @@ class TestUserSkillsAsRequirements(unittest.TestCase):
                          "JD 没提的技能被硬塞进简历了")
 
 
+
+class TestIdentityFromJob(unittest.TestCase):
+    """**身份信息按岗位自动填** —— 模板页眉那些字段。
+
+    ## 用户原话
+
+    > 意向岗位、及意向城市，根据岗位JD有的内容自动化填写。
+
+    ## 为什么
+
+    简历模板页眉常有「意向岗位 / 意向城市 / 期望薪资 / 求职类型」。
+    **每个岗位都不一样** —— 投重庆的岗位写「意向城市：重庆」，
+    投广州的写「广州」。手填的值**必然过期**。
+
+    → **从 JD 自动取**，不靠手填。
+    """
+
+    def _job(self, **kw):
+        base = {"title": "跨境电商运营", "city": "重庆 两江新区",
+                "salary": "9000-15000元", "degree": "本科"}
+        base.update(kw)
+        return base
+
+    def test_headline_from_job_title(self):
+        """**意向岗位 = 岗位标题** —— 这份简历投的什么岗。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(self._job(), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["headline"], "跨境电商运营")
+
+    def test_job_title_overrides_profile_headline(self):
+        """**岗位标题优先于画像里的** —— 画像写「前端工程师」，
+        投的是运营岗 → 简历上不能写前端。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(
+            self._job(), {"identity": {"name": "张三", "headline": "前端工程师"}})
+        self.assertEqual(ident["headline"], "跨境电商运营")
+
+    def test_city_stripped_to_city(self):
+        """**城市要洗成「重庆」不是「重庆 两江新区」**。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(self._job(), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["location"], "重庆")
+
+    def test_city_strips_mask_stars(self):
+        """**城市要洗掉脱敏星号** —— 未登录时招聘网站给的是
+        「杭州*********」→ 直接写进简历 → 简历上一串星号。
+
+        本机踩过：意向城市 = "杭州*********"。
+        """
+        from resume_builder import _build_identity
+        ident = _build_identity(
+            self._job(city="杭州*********"), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["location"], "杭州")
+
+    def test_job_city_overrides_profile_location(self):
+        """**岗位城市优先** —— 投的哪个城就写哪个城。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(
+            self._job(), {"identity": {"name": "张三", "location": "广州"}})
+        self.assertEqual(ident["location"], "重庆")
+
+    def test_salary_prefers_profile(self):
+        """**薪资：画像填了用画像的** —— 那是用户的期望；
+        没填才用岗位上的（那是招聘方开的价）。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(
+            self._job(), {"identity": {"name": "张三", "salary": "12k-18k"}})
+        self.assertEqual(ident["salary"], "12k-18k")
+
+    def test_salary_falls_back_to_job(self):
+        """**画像没填薪资 → 用岗位的**。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(self._job(), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["salary"], "9000-15000元")
+
+    def test_job_type_from_title(self):
+        """**标题带「实习」→ 求职类型 = 实习**。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(
+            self._job(title="跨境电商运营实习生"), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["job_type"], "实习")
+
+    def test_degree_from_job(self):
+        """**学历：画像没填就用岗位要求的**。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(self._job(), {"identity": {"name": "张三"}})
+        self.assertEqual(ident["degree"], "本科")
+
+    def test_identity_personal_fields_kept(self):
+        """**姓名/电话/邮箱跟岗位无关** —— 不能被覆盖。"""
+        from resume_builder import _build_identity
+        ident = _build_identity(self._job(), {"identity": {
+            "name": "张三", "phone": "13800000000", "email": "a@b.cn"}})
+        self.assertEqual(ident["name"], "张三")
+        self.assertEqual(ident["phone"], "13800000000")
+        self.assertEqual(ident["email"], "a@b.cn")
+
+    def test_optimize_resume_uses_job_identity(self):
+        """**整条链路要用自动填的 identity** —— 不是画像里的旧的。"""
+        out = optimize_resume(
+            job={"title": "速卖通运营", "city": "广州 天河区",
+                 "salary": "8k-12k", "description": "负责速卖通店铺运营"},
+            profile={"identity": {"name": "张三", "location": "重庆"},
+                     "skills": ["速卖通"],
+                     "experience_text": "负责速卖通店铺运营与选品"},
+            experiences=[],
+        )
+        ident = out["resume"]["identity"]
+        self.assertEqual(ident["headline"], "速卖通运营")
+        self.assertEqual(ident["location"], "广州")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

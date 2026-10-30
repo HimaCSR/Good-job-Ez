@@ -406,6 +406,75 @@ def build_sections(resume_data):
     return sections
 
 
+
+def _build_identity(job, profile):
+    """**按岗位把身份信息补齐** —— 模板页眉那些字段自动填。
+
+    ## 为什么
+
+    简历模板（WPS 系）的页眉上常有「意向岗位 / 意向城市 /
+    期望薪资 / 求职类型 / 学历」。这些**每个岗位都不一样** ——
+    拿画像里的固定值填就错了（投重庆的岗位，简历写着意向城市「广州」）。
+
+    → **优先用岗位自己的信息**，画像里没填的再退回。
+
+    ## 字段对应
+
+    | 模板字段 | 来源 |
+    | --- | --- |
+    | 意向岗位（headline） | **岗位标题** |
+    | 意向城市（location） | **岗位城市**（去掉区县） |
+    | 期望薪资（salary） | **岗位薪资** |
+    | 求职类型（job_type） | 画像（默认「社招」） |
+    | 学历（degree） | 岗位学历要求（画像优先） |
+    | 姓名 / 电话 / 邮箱 | **画像**（跟岗位无关） |
+
+    ## 城市要洗成「城市」不是「城市+区县」
+
+    岗位城市是「重庆 两江新区」→ 简历上写「重庆 两江新区」不好看，
+    而且跟用户设置的投递城市对不上 → **取第一个词**（重庆）。
+    """
+    identity = dict(profile.get("identity") or {})
+
+    # **意向岗位 = 岗位标题** —— 这是这份简历投的什么岗，最该准确。
+    title = (job.get("title") or "").strip()
+    if title:
+        identity["headline"] = title
+
+    # **意向城市 = 岗位城市**（洗掉区县）
+    #
+    # **岗位城市优先** —— 投的哪个城就写哪个城。
+    # 画像里的 location 是「用户想去哪」，跟这份简历投的城市不一定一致。
+    city = (job.get("city") or "").strip()
+    if city:
+        first = re.split(r"[\s,，、/]+", city)[0].strip()
+        # **洗掉脱敏星号** —— 招聘网站未登录时城市显示成
+        # 「杭州*********」→ 直接写进简历 → 简历上一串星号。
+        #
+        # 本机踩过：意向城市 = "杭州*********"。
+        first = first.replace("*", "").strip()
+        if first:
+            identity["location"] = first
+
+    # **期望薪资** —— 画像填了用画像的（用户自己填的是期望），
+    # 没填才用岗位上的（那是招聘方开的价，不是你的期望）。
+    if not identity.get("salary"):
+        salary = (job.get("salary") or "").strip()
+        if salary:
+            identity["salary"] = salary
+
+    # **学历** —— 岗位要求的学历（画像填了就用画像的）
+    degree = (job.get("degree") or "").strip()
+    if degree and not identity.get("degree"):
+        identity["degree"] = degree
+
+    # **求职类型** —— 岗位标题里带「实习」就是实习
+    if not identity.get("job_type"):
+        identity["job_type"] = "实习" if "实习" in title else "社招"
+
+    return identity
+
+
 def optimize_resume(job, profile, template_id="classic", experiences=None):
     """跑完四步，返回一份可渲染的简历数据。
 
@@ -440,8 +509,7 @@ def optimize_resume(job, profile, template_id="classic", experiences=None):
     matched["requirements"] = reqs
 
     # 组装简历
-    identity = dict(profile.get("identity") or {})
-    identity.setdefault("headline", job.get("title") or "")
+    identity = _build_identity(job, profile)
 
     # 经历 → 工作经历 / 项目经历
     project_kw = ["项目", "负责", "主导", "独立", "从 0 到 1", "0-1"]

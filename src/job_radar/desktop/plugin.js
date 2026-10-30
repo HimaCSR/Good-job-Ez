@@ -713,24 +713,22 @@ function ProfileView({ ctx, cfg, onSaved }) {
             //
             // 本机踩过：现场管理模板有 5 个页眉字段，用户画像一个都没有
             // → 页眉只剩姓名。
-            jsx(Field, {
-              label: '意向岗位',
-              children: jsx(Input, {
-                value: identity.headline || '',
-                onChange: (e) => setIdentity('headline', e.target.value),
-                placeholder: '跨境电商运营',
-              }),
-            }),
-            jsx(Field, {
-              label: '意向城市',
-              children: jsx(Input, {
-                value: identity.location || '',
-                onChange: (e) => setIdentity('location', e.target.value),
-                placeholder: '重庆',
-              }),
-            }),
+            // **意向岗位 / 意向城市 / 期望薪资 不在这里填** ——
+            //
+            // 用户原话：「意向岗位、及意向城市，根据岗位JD有的内容自动化填写」。
+            //
+            // → **每个岗位都不一样**（投重庆的岗位写「意向城市：重庆」，
+            // 投广州的写「广州」）→ 手填的值**必然过期**。
+            // → **简历优化时从 JD 自动取**（`resume_builder._build_identity`）。
+            //
+            // 保留手填反而坑：用户填了「广州」，投重庆的岗位时
+            // 简历上写「广州」→ 投错地方。
+            //
+            // 这里的表单只留**跟岗位无关**的（姓名/电话/邮箱/性别/年龄/学历/学校/专业）。
+
             jsx(Field, {
               label: '期望薪资',
+              hint: '留空就用岗位上写的',
               children: jsx(Input, {
                 value: identity.salary || '',
                 onChange: (e) => setIdentity('salary', e.target.value),
@@ -2463,6 +2461,13 @@ function ResumeView({ ctx, cfg }) {
   const [previewTpl, setPreviewTpl] = React.useState(null)
   // **待确认的转换结果** —— 先转换+预览，用户点「加入模板库」才落盘
   const [pendingItems, setPendingItems] = React.useState([])
+  // **正在编辑槽位的模板** ——
+  //
+  // 用户反馈：「模板库没有编辑槽位的功能」——
+  // 之前只在**预览弹窗**里放了个按钮，要点两层才看得到。
+  // → **模板库卡片上直接开编辑器**（不用先预览）。
+  const [slotTpl, setSlotTpl] = React.useState(null)
+  const [slotData, setSlotData] = React.useState(null)
   const [committing, setCommitting] = React.useState(false)
 
   // 单个文件 → base64
@@ -2600,6 +2605,24 @@ function ResumeView({ ctx, cfg }) {
     }
   }
 
+  // **打开槽位编辑器** ——
+  //
+  // **先拉一次槽位** —— 没有槽位的模板（内置的 / docx 的）不显示编辑入口。
+  // 拉不到就提示一句，不弹空编辑器。
+  const openSlotEditor = async (tpl) => {
+    try {
+      const r = await ctx.rest('/templates/slots?template_id=' + encodeURIComponent(tpl.template_id))
+      if (!r || r.ok === false || !r.has_slots) {
+        setConvertMsg('这个模板没有槽位（只有 PDF 转换来的模板有）')
+        return
+      }
+      setSlotData(r)
+      setSlotTpl(tpl)
+    } catch (e) {
+      setConvertMsg(String((e && e.message) || e))
+    }
+  }
+
   // 删掉一个上传的模板（内置模板不给删）
   const onDeleteTemplate = async (tpl) => {
     if (!tpl || !tpl.template_id) return
@@ -2670,6 +2693,10 @@ function ResumeView({ ctx, cfg }) {
             onToggle: () => toggle(tpl.template_id),
             // **预览** —— 看看这个模板渲染成什么样
             onPreview: () => setPreviewTpl(tpl),
+            // **编辑槽位** —— 只有上传的模板有槽位（PDF 转换来的）
+            onEditSlots: (tpl.builtin || tpl.format === 'builtin')
+              ? null
+              : () => openSlotEditor(tpl),
             // 只有上传的模板能删
             onDelete: (tpl.builtin || tpl.format === 'builtin')
               ? null
@@ -2798,6 +2825,32 @@ function ResumeView({ ctx, cfg }) {
       tpl: previewTpl,
       ctx,
       onClose: () => setPreviewTpl(null),
+    }) : null,
+
+    // ── 槽位编辑器 ──
+    //
+    // **直接挂在页面上**（不是预览弹窗里）——
+    // 用户反馈「模板库没有编辑槽位的功能」→ 要在模板库这一层就能进。
+    slotTpl && slotData ? jsxs('div', {
+      className: 'fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6',
+      onClick: () => { setSlotTpl(null); setSlotData(null) },
+      children: jsx('div', {
+        className: 'w-full max-w-5xl',
+        onClick: (e) => e.stopPropagation(),
+        children: jsx(SlotEditor, {
+          templateId: slotTpl.template_id,
+          slots: slotData.edit || { name: null, fields: [], sections: [] },
+          roles: slotData.roles || [],
+          ctx,
+          onSaved: () => {
+            setSlotTpl(null)
+            setSlotData(null)
+            setConvertMsg('槽位已保存')
+            qc.invalidateQueries({ queryKey: ['job-radar', 'templates'] })
+          },
+          onCancel: () => { setSlotTpl(null); setSlotData(null) },
+        }),
+      }),
     }) : null,
 
     // ── 转换结果待确认 ──
@@ -3220,10 +3273,10 @@ function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
                         value: sc.kind || 'paragraph',
                         onChange: (e) => setSection(i, { kind: e && e.target ? e.target.value : 'paragraph' }),
                         children: [
-                          jsx('option', { value: 'paragraph', children: '段落' }),
-                          jsx('option', { value: 'list', children: '列表' }),
-                          jsx('option', { value: 'entry', children: '条目' }),
-                          jsx('option', { value: 'tags', children: '标签' }),
+                          jsx('option', { key: 'p', value: 'paragraph', children: '段落' }),
+                          jsx('option', { key: 'l', value: 'list', children: '列表' }),
+                          jsx('option', { key: 'e', value: 'entry', children: '条目' }),
+                          jsx('option', { key: 't', value: 'tags', children: '标签' }),
                         ],
                       }),
                       jsx('button', {
@@ -3280,7 +3333,7 @@ function SlotEditor({ templateId, slots, roles, ctx, onSaved, onCancel }) {
 }
 
 /** 模板卡 —— 内置模板画一个迷你预览缩略图，上传模板用文件名。 */
-function TemplateCard({ tpl, active, onToggle, onDelete, onPreview }) {
+function TemplateCard({ tpl, active, onToggle, onDelete, onPreview, onEditSlots }) {
   const builtin = tpl.builtin || tpl.format === 'builtin'
   // **外层是 div 不是 button** —— 上传的模板要在角上放「删除」按钮，
   // button 里套 button 是非法 HTML，浏览器会拆掉结构导致点击错位。
@@ -3347,6 +3400,18 @@ function TemplateCard({ tpl, active, onToggle, onDelete, onPreview }) {
         title: '预览这个模板',
         className: 'absolute bottom-2 left-2 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-text-primary)',
         children: '预览',
+      }) : null,
+      // **「槽位」按钮** —— 直接在卡片上编辑模板的槽位。
+      //
+      // 用户反馈：「模板库没有编辑槽位的功能」——
+      // 之前只放在**预览弹窗**里，要点两层才看得到。
+      // → **放到卡片上，hover 就出现**，一眼能看见。
+      onEditSlots ? jsx('button', {
+        type: 'button',
+        onClick: onEditSlots,
+        title: '编辑这个模板的槽位（姓名/联系方式/章节）',
+        className: 'absolute bottom-2 left-14 rounded border border-(--ui-stroke-tertiary) bg-(--ui-bg-editor) px-1.5 py-0.5 text-[0.625rem] text-(--ui-text-tertiary) opacity-0 transition-opacity group-hover:opacity-100 hover:text-(--ui-text-primary)',
+        children: '槽位',
       }) : null,
       // 删除按钮 —— 只有上传的模板能删，内置模板没有
       onDelete ? jsx('button', {
