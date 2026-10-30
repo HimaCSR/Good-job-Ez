@@ -254,10 +254,35 @@ class TestConfigDefaultsAligned(unittest.TestCase):
                     "max_jobs_per_run", "sites", "request_gap_seconds",
                     "rounds_per_day", "push_max", "push_new_only",
                     "notify_on_failure", "active_hours",
-                    # **下面三个是 2026-10-30 补上的** —— 漏了设置页读不到
-                    "directions", "scan_times", "push_times", "mock"):
+                    # **下面两个是 2026-10-30 补上的** —— 漏了设置页读不到
+                    "directions", "scan_times", "mock"):
             self.assertIn(key, api.DEFAULT_SETTINGS,
                           "DEFAULT_SETTINGS 漏了 %s" % key)
+
+    def test_push_times_removed(self):
+        """**`push_times` 不该再出现** —— 推送改成「抓完就推」。
+
+        2026-10-30 用户决定：「推送时间与抓取完岗位后推送即可。」
+        → 推送没有自己的时间点了。
+
+        **`plugin.yaml` 里那个键留着**（兼容老配置，读到就忽略），
+        但 **`DEFAULT_SETTINGS` / `config.load_config()` 里不能有** ——
+        否则设置页又会显示出一个「推送时间」输入框。
+        """
+        self.assertNotIn("push_times", api.DEFAULT_SETTINGS,
+                         "推送已经没有独立时间点了，别放回默认配置")
+        cfg = api._sibling("config") if hasattr(api, "_sibling") else None
+        if cfg is not None:
+            self.assertNotIn("push_times", cfg._defaults())
+            # **有 ctx 的分支也不能有** —— 两个分支的键必须一致
+            class _Ctx:
+                def get_config(self, key, default=None):
+                    return default
+            cfg.set_context(_Ctx())
+            try:
+                self.assertNotIn("push_times", cfg.load_config())
+            finally:
+                cfg.set_context(None)
 
     def test_push_max_consistent(self):
         """**`push_max` 三处默认值必须一致**（历史上是 3/3/5）。"""
@@ -271,8 +296,11 @@ class TestConfigDefaultsAligned(unittest.TestCase):
         path = os.path.join(_PLUGIN_DIR, "plugin.yaml")
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        for key in ("scan_times:", "push_times:", "directions:", "push_max:"):
+        for key in ("scan_times:", "directions:", "push_max:"):
             self.assertIn(key, text, "plugin.yaml 漏了 %s" % key)
+        # **`push_times` 留着只为兼容老配置** —— 描述里要写明「已废弃」
+        self.assertIn("push_times:", text)
+        self.assertIn("已废弃", text)
 
 
 if __name__ == "__main__":

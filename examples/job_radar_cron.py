@@ -156,14 +156,16 @@ def main():
     except Exception:
         pass
 
-    # ── **用户自定义抓取/推送时间** ──
+    # ── **用户自定义抓取时间** ──
     #
-    # cron 每 10 分钟醒一次 → 每次问「现在该抓吗？该推吗？」
+    # cron 每 10 分钟醒一次 → 每次问「现在该抓吗？」
     #
     # - `scan_times` —— 该抓的时间点（默认 09:00 / 13:00 / 17:00 / 21:00）
-    # - `push_times` —— 该推的时间点（默认 09:30 / 17:30）
     #
-    # **都不命中 → 静默退出**（stdout 为空 = 不推送）。
+    # **推送没有自己的时间点** —— 命中抓取档 → 抓一轮 → **抓完立刻推**
+    # （2026-10-30 用户决定：「推送时间与抓取完岗位后推送即可。」）
+    #
+    # **不命中 → 静默退出**（stdout 为空 = 不推送）。
     #
     # **同一时间点只干一次** —— 09:00 那档，cron 会在 09:00/09:10/09:20
     # 各醒一次 → 不去重的话抓取跑 3 遍 → 浪费请求、可能撞风控。
@@ -221,10 +223,9 @@ def main():
     #
     # 不加标记 → 用户清空后又被默认档填回去 → **清空没用**。
     #
-    # `scan_times_disabled` / `push_times_disabled` 就是那个标记
+    # `scan_times_disabled` 就是那个标记
     # （前端保存时如果用户把列表清空，就把它设成 true）。
     DEFAULT_SCAN = ["09:00", "13:00", "17:00", "21:00"]
-    DEFAULT_PUSH = ["09:30", "17:30"]
 
     def _slots(key, disabled_key, default):
         if settings.get(disabled_key):
@@ -233,10 +234,25 @@ def main():
         return v if v else list(default)  # **没配过** → 用默认档
 
     scan_times = _slots("scan_times", "scan_times_disabled", DEFAULT_SCAN)
-    push_times = _slots("push_times", "push_times_disabled", DEFAULT_PUSH)
 
+    # ── **抓完就推**（2026-10-30 用户决定）──
+    #
+    # 用户原话：「推送时间与抓取完岗位后推送即可。」
+    #
+    # **推送没有自己的时间点了** —— 只有抓取时间点。
+    # 命中抓取档 → 抓一轮 → **抓完立刻推**。
+    #
+    # **为什么这么改**：分开定两个时间点，用户得自己对齐
+    # （「我 09:00 抓，那 09:30 推吧」→ 还得记两套时间）。
+    # 抓完就推 = **一个时间点就够了**，也不会出现「抓了但没推」。
+    #
+    # **保留 `--mode push`** —— 手动只想推一次时还能用
+    # （不需要重新抓）。
     do_scan = want_scan and _should("scan", scan_times, "cron_scan_slot")
-    do_push = want_push and _should("push", push_times, "cron_push_slot")
+    # **mode=push 时单独触发**（不依赖抓取档）
+    do_push = want_push and (
+        (mode == "push") or do_scan
+    )
 
     if not do_scan and not do_push:
         # 静默 —— 不打扰用户

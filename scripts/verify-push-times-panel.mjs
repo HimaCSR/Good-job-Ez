@@ -114,7 +114,7 @@ async function main() {
   console.log('「推送内容」面板时间编辑器 —— 真实 DOM 渲染验证')
   console.log('='.repeat(62))
 
-  const state = { settings: { scan_times: ['09:00'], push_times: ['17:30'] }, saved: [] }
+  const state = { settings: { scan_times: ['09:00'] }, saved: [] }
 
   const sdk = {
     React,
@@ -171,11 +171,12 @@ async function main() {
 
   check('「推送内容」面板渲染出来了', text().includes('推送内容'))
   check('面板里有「每天抓取时间」', text().includes('每天抓取时间'))
-  check('面板里有「每天推送时间」', text().includes('每天推送时间'))
+  // **没有推送时间** —— 推送是「抓完就推」（2026-10-30 用户决定）
+  check('面板里**没有**「每天推送时间」', !text().includes('每天推送时间'))
 
   // ── 已配的时间点要显示出来 ──
   check('已配的抓取时间显示出来了', text().includes('09:00'), text().slice(0, 200))
-  check('已配的推送时间显示出来了', text().includes('17:30'))
+  check('文案说明「抓完立即推送」', text().includes('抓完立即推送'))
 
   // ── 「＋ 添加抓取时间」按钮存在 ──
   const addScan = buttons().find((b) => (b.textContent || '').includes('添加抓取时间'))

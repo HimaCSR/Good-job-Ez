@@ -40,14 +40,19 @@ def set_context(ctx):
 def _defaults():
     """没有 ctx、也读不到 Hermes 配置时的兜底。
 
-    ## `scan_times` / `push_times`
+    ## `scan_times`
 
-    **用户自定义抓取/推送时间** —— 每天几点抓、几点推。
+    **用户自定义抓取时间** —— 每天几点抓。
 
     空列表 = **不按点自动跑**（cron 脚本会静默退出）。
 
     cron 每 10 分钟醒一次，脚本自己判断现在该不该干活
     （见 `schedule.should_run`）—— 同一时间点只触发一次。
+
+    ## `push_times` —— **已废弃**
+
+    推送现在是「**抓完就推**」（2026-10-30 用户决定），
+    **没有自己的时间点**。这个键留着只为兼容老配置。
     """
     return {"keywords": [], "city": "653", "cities": [],
             "boss_city": "101210100",
@@ -60,8 +65,8 @@ def _defaults():
             "active_hours": "09:00 - 22:00",
             # **用户可选方向** —— 每天只推这些方向里评分最高的
             "directions": [],
-            # **抓取/推送时间点**
-            "scan_times": [], "push_times": []}
+            # **抓取时间点**
+            "scan_times": []}
 
 
 def _read_settings_from_hermes():
@@ -199,7 +204,7 @@ def load_config():
         "notify_on_failure": bool(get("notify_on_failure", default=True)),
         "active_hours": get("active_hours", default="09:00 - 22:00"),
         # ────────────────────────────────────────────────────────────
-        # **下面三个键不能漏** ——
+        # **下面两个键不能漏** ——
         #
         # `tools.directions()` 拿 `load_config()` 的整份结果去
         # `_write_config()` **写回**（`cfg["directions"] = uniq`）。
@@ -207,14 +212,17 @@ def load_config():
         #
         # **踩过**：`directions` 漏了 → 用户选的方向被默认值 [] 冲掉
         # → 「每天只推一个方向」退化成「推分数最高的方向」。
-        # `scan_times` / `push_times` 漏了 → 同理，用户配的时间点被冲掉。
+        # `scan_times` 漏了 → 同理，用户配的时间点被冲掉。
         #
         # **有 ctx 和没 ctx 两个分支的键必须一致** ——
         # 独立脚本（cron）走的是没 ctx 那条路。
+        #
+        # **注意**：`push_times` **已经不在这里了** ——
+        # 推送改成「抓完就推」，没有自己的时间点（2026-10-30 用户决定）。
+        # 老配置里那个键由 cron 脚本自己忽略。
         # ────────────────────────────────────────────────────────────
         "directions": get("directions", default=[]),
         "scan_times": get("scan_times", default=[]),
-        "push_times": get("push_times", default=[]),
     }
 
 

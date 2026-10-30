@@ -2076,12 +2076,11 @@ function PushSettingsPanel({ ctx, cfg }) {
   })
 
   const pushMax = settings.push_max ?? 5
-  // **时间点** —— 用户自定义的抓取/推送时刻
+  // **时间点** —— 用户自定义的抓取时刻
   //
   // **文案要跟着实际机制走** —— 改成按时间点触发后，
   // 「每天 N 次」「每 N 小时一次」都不再成立。
   const scanTimes = settings.scan_times || []
-  const pushTimes = settings.push_times || []
   const fmtTimes = (list) => (list.length ? list.join('、') : '未设置')
 
   return jsx(Panel, {
@@ -2098,7 +2097,7 @@ function PushSettingsPanel({ ctx, cfg }) {
       children: advOpen ? '收起' : '高级',
     }),
     children: jsxs('div', { className: 'flex flex-col gap-3', children: [
-      // ── **时间点编辑器** ──
+      // ── **抓取时间点编辑器** ──
       //
       // **为什么放这里（而不是只在「设置」页）** ——
       //
@@ -2112,38 +2111,25 @@ function PushSettingsPanel({ ctx, cfg }) {
       // → 「设置」页那个面板已删，这里是**唯一**入口。
       //
       // **默认展开** —— 时间点是这面板的核心，不藏进「高级」。
-      jsxs('div', { className: 'grid grid-cols-2 gap-4', children: [
-        jsx('div', {
-          className: 'min-w-0',
-          children: [
-            jsx('div', { className: 'text-sm font-medium', children: '每天抓取时间' }),
-            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
-              children: '到点自动抓一轮。留空 = 不自动抓' }),
-            jsx('div', { className: 'mt-2', children: jsx(TimeSlotEditor, {
-              value: scanTimes,
-              onChange: (v) => set('scan_times', v),
-              addLabel: '添加抓取时间',
-            }) }),
-          ],
-        }),
-        jsx('div', {
-          className: 'min-w-0',
-          children: [
-            jsx('div', { className: 'text-sm font-medium', children: '每天推送时间' }),
-            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
-              children: '到点推送该方向最高分的几条。留空 = 不自动推' }),
-            jsx('div', { className: 'mt-2', children: jsx(TimeSlotEditor, {
-              value: pushTimes,
-              onChange: (v) => set('push_times', v),
-              addLabel: '添加推送时间',
-            }) }),
-          ],
-        }),
+      //
+      // ── **只有抓取时间，没有推送时间**（2026-10-30 用户决定）──
+      //
+      // 用户原话：「推送时间与抓取完岗位后推送即可。」
+      // → **抓完就推** → 只需要一个时间点。
+      jsxs('div', { className: 'min-w-0', children: [
+        jsx('div', { className: 'text-sm font-medium', children: '每天抓取时间' }),
+        jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+          children: '到点自动抓一轮，抓完立刻推送。留空 = 不自动运行' }),
+        jsx('div', { className: 'mt-2', children: jsx(TimeSlotEditor, {
+          value: scanTimes,
+          onChange: (v) => set('scan_times', v),
+          addLabel: '添加抓取时间',
+        }) }),
       ]}),
       jsx('div', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
-        children: (scanTimes.length || pushTimes.length
-          ? ('当前：每天 ' + fmtTimes(scanTimes) + ' 抓取，' + fmtTimes(pushTimes) + ' 推送。')
-          : '未设置抓取/推送时间点 —— 不会自动运行。') +
+        children: (scanTimes.length
+          ? ('当前：每天 ' + fmtTimes(scanTimes) + ' 抓取，抓完立即推送。')
+          : '未设置抓取时间点 —— 不会自动运行。') +
           '每个方向最多推 ' + pushMax + ' 条。' +
           (settings.push_new_only !== false ? '只推当天新出现的岗位。' : '每次都会推最高分的几条。') }),
       advOpen ? jsxs('div', { className: 'flex flex-col gap-3 border-t border-(--ui-stroke-tertiary) pt-3', children: [
@@ -2229,8 +2215,17 @@ function SettingsView({ ctx, cfg }) {
     mutationFn: async (next) => {
       const body = { ...next }
       // **时间点清空 → 打「禁用」标记**
+      //
+      // `hermes config get` **不输出空列表的键** ——
+      // cron 脚本读不到「用户把时间清空了」这件事，
+      // 就会用默认档填回去 → **清空没用**。
+      //
+      // → 清空时同时写 `scan_times_disabled: true`，
+      //   cron 脚本看到这个标记就**不跑**。
+      //
+      // **只有抓取时间** —— 推送是「抓完就推」，没有自己的时间点
+      // （2026-10-30 用户决定）。
       body.scan_times_disabled = !(body.scan_times && body.scan_times.length)
-      body.push_times_disabled = !(body.push_times && body.push_times.length)
       return ctx.rest('/settings', { method: 'POST', body: { settings: body } })
     },
     onSuccess: () => {

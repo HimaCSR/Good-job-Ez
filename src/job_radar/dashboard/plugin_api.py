@@ -727,9 +727,9 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "active_hours": "09:00 - 22:00",
     # **用户可选方向** —— 空 = 全方向都算
     "directions": [],
-    # **抓取/推送时间点** —— 与 plugin.yaml 一致
+    # **抓取时间点** —— 与 plugin.yaml 一致
+    # （**推送没有自己的时间点** —— 抓完就推，2026-10-30 用户决定）
     "scan_times": ["09:00", "13:00", "17:00", "21:00"],
-    "push_times": ["09:30", "17:30"],
     "mock": False,
 }
 
