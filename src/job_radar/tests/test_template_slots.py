@@ -500,5 +500,85 @@ class TestTemplateStoreSlots(unittest.TestCase):
         self.assertFalse(r.get("ok"))
         self.assertFalse(r.get("has_slots"))
 
+
+class TestGatewayLikeImport(unittest.TestCase):
+    """**模块要在「像 gateway 一样」的环境里能加载**。
+
+    ## 为什么测这个
+
+    用户报「点击槽位无响应」→ 日志里是
+    `500: Internal Server Error`。
+
+    **根因不在端点** —— 端点单独调是 200。
+    根因是**兄弟模块的绝对导入**：
+    插件 API 把兄弟模块注册成 `job_radar.xxx`，
+    **插件根不在 sys.path 里** → `import template_slots` 失败。
+
+    ## 这个测试怎么模拟 gateway
+
+    - 注册 `job_radar` 包（`__path__` 指向插件根）
+    - **不把插件根加进 sys.path**（gateway 就是这样）
+    - 用 `spec_from_file_location` 加载（跟 `_load_siblings` 一样）
+
+    → 绝对导入会炸，相对导入（带 fallback）不会。
+    """
+
+    def _load_like_gateway(self, names):
+        import importlib.util
+        import sys
+        import types
+
+        # **插件根 = job_radar 包目录**（tests/ 的上一级）
+        plugin_root = os.path.dirname(os.path.dirname(
+            os.path.abspath(__file__)))
+        pkg = types.ModuleType("job_radar_test_pkg")
+        pkg.__path__ = [plugin_root]
+        pkg.__package__ = "job_radar_test_pkg"
+        sys.modules["job_radar_test_pkg"] = pkg
+        loaded = {}
+        for name in names:
+            path = os.path.join(plugin_root, name + ".py")
+            mod_name = "job_radar_test_pkg." + name
+            spec = importlib.util.spec_from_file_location(mod_name, path)
+            mod = importlib.util.module_from_spec(spec)
+            sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+            loaded[name] = mod
+        return loaded
+
+    def test_template_slots_loads_without_plugin_root_on_path(self):
+        """**template_slots 要能加载** —— 绝对导入会炸。"""
+        import sys
+        saved = list(sys.path)
+        try:
+            # **把插件根从 sys.path 里踢掉** —— 模拟 gateway
+            here = os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))
+            sys.path = [p for p in sys.path
+                        if os.path.abspath(p or ".") != os.path.abspath(here)]
+            loaded = self._load_like_gateway(
+                ["template_convert", "resume_template", "template_slots"])
+            self.assertIn("template_slots", loaded)
+        finally:
+            sys.path = saved
+
+    def test_template_store_loads_without_plugin_root_on_path(self):
+        """**template_store 要能加载** —— 它 import template_slots。"""
+        import sys
+        saved = list(sys.path)
+        try:
+            here = os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__)))
+            sys.path = [p for p in sys.path
+                        if os.path.abspath(p or ".") != os.path.abspath(here)]
+            loaded = self._load_like_gateway([
+                "template_convert", "resume_template",
+                "template_slots", "template_store"])
+            self.assertIn("template_store", loaded)
+            self.assertTrue(hasattr(loaded["template_store"], "load_slots"))
+            self.assertTrue(hasattr(loaded["template_store"], "save_slots"))
+        finally:
+            sys.path = saved
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

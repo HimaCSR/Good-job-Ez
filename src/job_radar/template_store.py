@@ -31,9 +31,11 @@ import shutil
 try:  # 包内导入
     from . import template_convert
     from . import resume_template
+    from . import template_slots
 except ImportError:  # 独立脚本 / 平铺导入
     import template_convert  # type: ignore
     import resume_template  # type: ignore
+    import template_slots  # type: ignore
 
 
 def _template_id(filename, ext):
@@ -112,11 +114,9 @@ def save_upload(filename, data_base64, kind=None, name=None,
         skeleton = ""
         if ext == "pdf":
             try:
-                import template_slots
                 spec, _n = template_slots.extract_slots(raw, "pdf")
                 if spec:
-                    import template_convert as _tc
-                    _css, _params = _tc._pdf_to_css(raw)
+                    _css, _params = template_convert._pdf_to_css(raw)
                     skeleton = template_slots.build_slot_html(spec, {
                         "font_family": _params.get("font_family"),
                         "text_color": "#333333",
@@ -161,11 +161,9 @@ def save_upload(filename, data_base64, kind=None, name=None,
     skeleton = ""
     if ext == "pdf":
         try:
-            import template_slots
             spec, _note = template_slots.extract_slots(raw, "pdf")
             if spec:
-                import template_convert as _tc
-                _css, _params = _tc._pdf_to_css(raw)
+                _css, _params = template_convert._pdf_to_css(raw)
                 style = {
                     "font_family": _params.get("font_family"),
                     "text_color": "#333333",
@@ -283,11 +281,6 @@ def save_slots(template_id, edit):
         return {"ok": False, "error": "这个模板没有骨架规格（不是 PDF 模板？）"}
 
     try:
-        import template_slots
-    except ImportError:
-        import template_slots
-
-    try:
         spec = template_slots.apply_slot_edit(spec, edit or {})
     except Exception as e:      # noqa: BLE001
         return {"ok": False, "error": "槽位编辑失败：%s" % e}
@@ -346,10 +339,6 @@ def load_slots(template_id):
             spec = json.load(fh)
     except (OSError, ValueError):
         return {"ok": False, "error": "没有槽位规格", "has_slots": False}
-    try:
-        import template_slots
-    except ImportError:
-        import template_slots
     return {
         "ok": True,
         "has_slots": True,

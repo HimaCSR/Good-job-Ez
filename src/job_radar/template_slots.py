@@ -70,6 +70,19 @@ PDF 用户坐标：**y 向上**（左下原点）。
 import os
 import re
 
+# `template_convert` 的导入要带 fallback ——
+#
+# **绝对导入在 gateway 里会失败** —— 插件 API 把兄弟模块注册成
+# `job_radar.xxx`，插件根**不在 sys.path 里** →
+# `import template_convert` → ModuleNotFoundError。
+#
+# 本机踩过：槽位端点 500 Internal Server Error，
+# 错误信息指向「找不到模块」而不是「端点写错了」。
+try:
+    from . import template_convert
+except ImportError:      # 脱离包单独导入时
+    import template_convert  # type: ignore
+
 __all__ = [
     "extract_slots",
     "build_slot_html",
@@ -393,23 +406,22 @@ def extract_slots(data, source="pdf"):
     返回 (spec, note)。spec 为 None 表示抽不出来。
     """
     if source == "pdf":
-        import template_convert as tc
-        items = tc._pdf_text_items(data)
+        items = template_convert._pdf_text_items(data)
         if not items:
             return None, "这个 PDF 里没抽出文字（可能是扫描件）。"
         # 页面高
         rects = []
-        alphas = tc._pdf_alpha_map(data)
-        objs = tc._pdf_objects(data)
-        forms = tc._pdf_forms(data, objs)
-        texts, _ = tc._pdf_streams(data)
+        alphas = template_convert._pdf_alpha_map(data)
+        objs = template_convert._pdf_objects(data)
+        forms = template_convert._pdf_forms(data, objs)
+        texts, _ = template_convert._pdf_streams(data)
         content = ""
         for t in texts:
             if re.search(r"/\S+\s+[\d.]+\s+Tf", t):
                 content = t
                 break
         if content:
-            rects = tc._pdf_rects(content, alphas, forms)
+            rects = template_convert._pdf_rects(content, alphas, forms)
         # **页面尺寸要用 MediaBox，不能用矩形坐标范围** ——
         # 很多模板在开头用 `0.24 0 0 -0.24 0 870 cm` **上下翻转**，
         # 翻转后 y 从 870 变成 -870 → 范围是 1740（翻倍了）。
@@ -418,7 +430,7 @@ def extract_slots(data, source="pdf"):
         # 姓名被当成章节标题、联系方式一个都抽不到。
         page_w = page_h = None
         try:
-            size = tc._pdf_page_size(data)      # mm
+            size = template_convert._pdf_page_size(data)      # mm
             if size:
                 page_h = size[1] / 25.4 * 72.0    # mm → pt
                 page_w = size[0] / 25.4 * 72.0
@@ -463,22 +475,21 @@ def extract_slots(data, source="pdf"):
     # **不能一律反白** —— 白底模板上白字 = 隐形（本机踩过）。
     header_is_dark = False
     try:
-        import template_convert as _tc
-        _alphas = _tc._pdf_alpha_map(data)
-        _objs = _tc._pdf_objects(data)
-        _forms = _tc._pdf_forms(data, _objs)
-        _texts, _ = _tc._pdf_streams(data)
+        _alphas = _template_convert._pdf_alpha_map(data)
+        _objs = _template_convert._pdf_objects(data)
+        _forms = _template_convert._pdf_forms(data, _objs)
+        _texts, _ = template_convert._pdf_streams(data)
         _content = ""
         for _t in _texts:
             if re.search(r"/\S+\s+[\d.]+\s+Tf", _t):
                 _content = _t
                 break
         if _content:
-            _rects = _tc._pdf_rects(_content, _alphas, _forms)
+            _rects = template_convert._pdf_rects(_content, _alphas, _forms)
             if _rects:
                 _ph = max(r[3] for r in _rects) - min(r[1] for r in _rects)
                 _pw = max(r[2] for r in _rects) - min(r[0] for r in _rects)
-                _lay = _tc._pdf_layout(_rects, _pw, _ph)
+                _lay = template_convert._pdf_layout(_rects, _pw, _ph)
                 header_is_dark = bool(_lay.get("_header_is_dark"))
     except Exception:
         header_is_dark = False
