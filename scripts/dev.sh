@@ -55,43 +55,47 @@ cmd_test() {
 
 # ── check ────────────────────────────────────────────────────────────────
 cmd_check() {
-    say "=== 1/10 单元测试 ==="
+    say "=== 1/11 单元测试 ==="
     cmd_test || die "测试没过"
 
     say ""
-    say "=== 2/10 桌面端 JS 语法 ==="
+    say "=== 2/11 桌面端 JS 语法 ==="
     cmd_check_desktop_js || die "桌面端 JS 语法不对"
 
     say ""
-    say "=== 3/10 桌面端 CSS 类存在性 ==="
+    say "=== 3/11 桌面端 CSS 类存在性 ==="
     cmd_check_desktop_css || die "桌面端用了 app CSS 里不存在的类（样式会静默失效）"
 
     say ""
-    say "=== 4/10 桌面端 jsx children 位置 ==="
+    say "=== 4/11 桌面端 jsx children 位置 ==="
     cmd_check_jsx_children || die "桌面端把 children 传到了第三个参数（React 当成 key → UI 不渲染）"
 
     say ""
-    say "=== 5/10 脱敏扫描 ==="
+    say "=== 5/11 脱敏扫描 ==="
     bash "$SCRIPT_DIR/check-sensitive.sh" || die "脱敏扫描没过"
 
     say ""
-    say "=== 6/10 桌面端表单交互 ==="
+    say "=== 6/11 桌面端表单交互 ==="
     cmd_check_form_input || die "桌面端表单输入有问题（打字打不进去 / 技能加不上）"
 
     say ""
-    say "=== 7/10 岗位推荐折叠 ==="
+    say "=== 7/11 岗位推荐折叠 ==="
     cmd_check_job_collapse || die "岗位推荐折叠有问题（不是前 5 条 / 展开收起坏了）"
 
     say ""
-    say "=== 8/10 多 Python 版本 ==="
+    say "=== 8/11 多 Python 版本 ==="
     cmd_check_multi_python || die "某个 Python 版本上测试没过（CI 会红）"
 
     say ""
-    say "=== 9/10 模板卡片渲染 ==="
+    say "=== 9/11 模板卡片渲染 ==="
     cmd_check_template_card || die "模板卡片在后端漏字段时会崩（整页渲染失败）"
 
     say ""
-    say "=== 10/10 仓库卫生 ==="
+    say "=== 10/11 推送时间面板 ==="
+    cmd_check_push_times_panel || die "「推送内容」面板里没有时间编辑器（用户看不到）"
+
+    say ""
+    say "=== 11/11 仓库卫生 ==="
     bash "$SCRIPT_DIR/check-repo.sh" || die "仓库卫生检查难过"
 
     ok "全部检查通过"
@@ -265,6 +269,44 @@ cmd_check_template_card() {
     [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
     if [ -z "$node_exe" ]; then
         warn "找不到 node，跳过模板卡片渲染检查"
+        return 0
+    fi
+
+    local checker_arg="$checker"
+    local target_arg="$target"
+    if command -v cygpath >/dev/null 2>&1; then
+        checker_arg="$(cygpath -w "$checker")"
+        target_arg="$(cygpath -w "$target")"
+    fi
+    "$node_exe" "$checker_arg" "$target_arg" || return 1
+}
+
+# 「推送内容」面板里**必须有**抓取/推送时间编辑器。
+#
+# ## 为什么要有这一步
+#
+# 用户反馈：「**推送内容模块并没有，选填推送时间的功能。**」
+#
+# 编辑器一直存在 —— 但在**「设置」页**里，而「推送内容」面板的提示语
+# 却写着「未设置抓取/推送时间点」→ **指向一个他看不到的地方**
+# → 像是功能不存在。
+#
+# **这类 bug 单测抓不到** —— 代码里 `TimeSlotEditor` 在不在、
+# 在哪个面板里，只有**真渲染**才能证明「用户看得到」。
+cmd_check_push_times_panel() {
+    local checker="$SCRIPT_DIR/verify-push-times-panel.mjs"
+    local target="$PLUGIN_DIR/desktop/plugin.js"
+    [ -f "$checker" ] || { warn "找不到 verify-push-times-panel.mjs，跳过"; return 0; }
+    [ -f "$target" ] || { warn "找不到 desktop/plugin.js，跳过"; return 0; }
+
+    local node_exe=""
+    if [ -n "${LOCALAPPDATA:-}" ]; then
+        local candidate="$LOCALAPPDATA/hermes/tools/node-26.7.0-win32-x64/node.exe"
+        [ -x "$candidate" ] && node_exe="$candidate"
+    fi
+    [ -z "$node_exe" ] && node_exe="$(command -v node || true)"
+    if [ -z "$node_exe" ]; then
+        warn "找不到 node，跳过推送时间面板检查"
         return 0
     fi
 

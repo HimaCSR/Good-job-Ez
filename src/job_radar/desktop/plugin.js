@@ -2083,9 +2083,6 @@ function PushSettingsPanel({ ctx, cfg }) {
   const scanTimes = settings.scan_times || []
   const pushTimes = settings.push_times || []
   const fmtTimes = (list) => (list.length ? list.join('、') : '未设置')
-  const timeText = scanTimes.length || pushTimes.length
-    ? ('每天 ' + fmtTimes(scanTimes) + ' 抓取，' + fmtTimes(pushTimes) + ' 推送。')
-    : '未设置抓取/推送时间点 —— 不会自动运行。'
 
   return jsx(Panel, {
     title: '推送内容',
@@ -2101,8 +2098,53 @@ function PushSettingsPanel({ ctx, cfg }) {
       children: advOpen ? '收起' : '高级',
     }),
     children: jsxs('div', { className: 'flex flex-col gap-3', children: [
+      // ── **时间点编辑器** ──
+      //
+      // **为什么放这里（而不是只在「设置」页）** ——
+      //
+      // 用户反馈：「推送内容模块并没有，选填推送时间的功能。」
+      //
+      // 之前编辑器在「设置」页的「抓取与推送时间」面板里，
+      // 而**这个面板的提示语却写着「未设置抓取/推送时间点」**
+      // → **指向一个他看不到的地方** → 像是功能不存在。
+      //
+      // **规则：功能入口要放在用户看的那一层**（同一个东西只能有一处）。
+      // → 「设置」页那个面板已删，这里是**唯一**入口。
+      //
+      // **默认展开** —— 时间点是这面板的核心，不藏进「高级」。
+      jsxs('div', { className: 'grid grid-cols-2 gap-4', children: [
+        jsx('div', {
+          className: 'min-w-0',
+          children: [
+            jsx('div', { className: 'text-sm font-medium', children: '每天抓取时间' }),
+            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+              children: '到点自动抓一轮。留空 = 不自动抓' }),
+            jsx('div', { className: 'mt-2', children: jsx(TimeSlotEditor, {
+              value: scanTimes,
+              onChange: (v) => set('scan_times', v),
+              addLabel: '添加抓取时间',
+            }) }),
+          ],
+        }),
+        jsx('div', {
+          className: 'min-w-0',
+          children: [
+            jsx('div', { className: 'text-sm font-medium', children: '每天推送时间' }),
+            jsx('div', { className: 'mt-1 text-[0.6875rem] leading-relaxed text-(--ui-text-tertiary)',
+              children: '到点推送该方向最高分的几条。留空 = 不自动推' }),
+            jsx('div', { className: 'mt-2', children: jsx(TimeSlotEditor, {
+              value: pushTimes,
+              onChange: (v) => set('push_times', v),
+              addLabel: '添加推送时间',
+            }) }),
+          ],
+        }),
+      ]}),
       jsx('div', { className: 'text-[0.6875rem] leading-relaxed text-(--ui-text-secondary)',
-        children: timeText + '每个方向最多推 ' + pushMax + ' 条。' +
+        children: (scanTimes.length || pushTimes.length
+          ? ('当前：每天 ' + fmtTimes(scanTimes) + ' 抓取，' + fmtTimes(pushTimes) + ' 推送。')
+          : '未设置抓取/推送时间点 —— 不会自动运行。') +
+          '每个方向最多推 ' + pushMax + ' 条。' +
           (settings.push_new_only !== false ? '只推当天新出现的岗位。' : '每次都会推最高分的几条。') }),
       advOpen ? jsxs('div', { className: 'flex flex-col gap-3 border-t border-(--ui-stroke-tertiary) pt-3', children: [
         row('自动抓取并推送', '到点自动运行（定时器每 10 分钟检查一次）',
@@ -2280,48 +2322,24 @@ function SettingsView({ ctx, cfg }) {
       // ── **抓取/推送时间** ──
       //
       // 用户诉求：「用户可自定义抓取时间及推送时间」
-      jsx(Panel, {
-        title: '抓取与推送时间',
-        hint: '留空 = 不按点自动跑',
-        actions: jsxs('div', { className: 'flex items-center gap-2', children: [
-          jsx(Button, {
-            size: 'sm',
-            variant: 'default',
-            disabled: save.isPending,
-            onClick: () => save.mutate(local),
-            children: save.isPending ? '保存中…' : '保存',
-          }),
-        ] }),
-        children: jsxs('div', { className: 'grid grid-cols-2 gap-4', children: [
-          jsx(Field, {
-            label: '每天抓取时间',
-            hint: '到点自动抓一轮',
-            children: jsx(TimeSlotEditor, {
-              value: local.scan_times || [],
-              onChange: (v) => set('scan_times', v),
-              addLabel: '添加抓取时间',
-            }),
-          }),
-          jsx(Field, {
-            label: '每天推送时间',
-            hint: '到点推送该方向最高分的几条',
-            children: jsx(TimeSlotEditor, {
-              value: local.push_times || [],
-              onChange: (v) => set('push_times', v),
-              addLabel: '添加推送时间',
-            }),
-          }),
-          jsx(Field, {
-            label: '每方向推送条数',
-            hint: '同一个方向里推几条（默认 5）',
-            children: jsx(Input, {
-              type: 'number',
-              value: String(local.push_max ?? 5),
-              onChange: (e) => set('push_max', Number(e.target.value) || 0),
-            }),
-          }),
-        ] }),
-      }),
+      // ── **抓取/推送时间** ──
+      //
+      // 用户诉求：「用户可自定义抓取时间及推送时间」
+      //
+      // ## ⭐ 这个面板**已删除**（2026-10-30）—— 挪到「日报 ▸ 推送内容」
+      //
+      // **用户反馈**：「推送内容模块并没有，选填推送时间的功能。」
+      //
+      // **真相**：编辑器一直存在，只是在**「设置」页**的这个面板里；
+      // 而**「推送内容」面板的提示语却写着「未设置抓取/推送时间点」**
+      // → 指向一个他看不到的地方 → 像是功能不存在。
+      //
+      // **规则：功能入口要放在用户看的那一层**，且**同一个东西只能有一处**
+      // （UI 约定：同类入口只留一处）。
+      //
+      // → 时间点编辑器挪到「日报 ▸ 推送内容」面板（**默认展开**）。
+      // → 这个面板删掉，避免两处改同一个值。
+      // → `push_max`（每方向推几条）在「推送内容 ▸ 高级」里，已有一份。
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
         title: '抓取城市',
