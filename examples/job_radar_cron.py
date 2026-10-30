@@ -62,6 +62,31 @@ def _load():
     return sys.modules
 
 
+def _unquote(text):
+    """**剥掉 YAML 的引号** —— 值本身是对的，但表示层可能带引号。
+
+    ## 为什么必须剥
+
+    `hermes config set` 写列表时，YAML 会给某些元素加引号
+    （`06:20` 在 YAML 里像时间戳 → 加引号；`11:20` 不加）：
+
+    ```
+    scan_times:
+      - 06:20
+      - '11:20'
+    ```
+
+    **不剥的话** cron 脚本读到 `"'11:20'"` → `parse_hhmm()` 失败
+    → **那个时间点永远不会触发**（静默失效，用户完全看不出来）。
+
+    → 标量值和列表项**都要剥**。
+    """
+    s = str(text or "").strip()
+    if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        return s[1:-1].strip()
+    return s
+
+
 def _read_settings():
     """从 Hermes 配置读设置（走 CLI，不手写 YAML）。"""
     import subprocess
@@ -87,7 +112,9 @@ def _read_settings():
             continue
         if line.lstrip().startswith("- "):
             if last:
-                out.setdefault(last, []).append(line.lstrip()[2:].strip())
+                # **列表项也要剥引号** —— 见 `_unquote` 的说明
+                out.setdefault(last, []).append(
+                    _unquote(line.lstrip()[2:]))
             continue
         if ":" not in line:
             continue
@@ -102,7 +129,7 @@ def _read_settings():
             try:
                 out[key] = int(raw)
             except ValueError:
-                out[key] = raw
+                out[key] = _unquote(raw)
     return out
 
 

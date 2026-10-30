@@ -437,6 +437,24 @@ def _write_config_settings(settings: Dict[str, Any]) -> None:
     **走 `hermes config set`，不手写 YAML。**
     手改 config.yaml 容易缩进错位（写坏一个缩进，整个 job-radar 节点就废了），
     CLI 会自己建嵌套块、保证缩进正确。
+
+    ## ⚠️ **只写「真正变了」的键** —— 否则会超时
+
+    **踩过（2026-10-30）**：桌面端点「保存」报
+    `Timed out connecting to Hermes backend after 30000ms`。
+    **用户填了东西点保存，什么都没存上。**
+
+    **根因**：一次 `hermes config set` 调用约 **2.2 秒**（CLI 启动开销）。
+    而设置页的 `local` 是**整份配置对象**（所有面板的字段都在里面）→
+    逐键写 → **15 个键 = 32 秒** → **超过桌面端 30 秒超时**。
+
+    → **先跟磁盘上的现值比**，只写**真的变了**的键。
+    用户只改一个时间点 → 只写 1 个键 → 2.2 秒，稳稳的。
+
+    ## 为什么要「并行」
+
+    即使去掉了没变的键，用户第一次点保存可能真要改 10 个键
+    → 22 秒，仍在 30 秒边缘。→ **并行执行** → 总耗时 ≈ 最慢的那一个。
     """
     import subprocess
 
@@ -446,20 +464,67 @@ def _write_config_settings(settings: Dict[str, Any]) -> None:
                             detail="找不到 hermes CLI，无法写配置")
 
     base = "plugins.entries.job-radar.settings."
-    for key, val in settings.items():
-        arg = _cli_value(val)
-        cmd = _cli_cmd(hermes) + ["config", "set", base + key, arg]
-        try:
-            proc = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
-                cwd=os.path.join(_hermes_home(), "hermes-agent"))
-        except Exception as e:
-            raise HTTPException(status_code=500,
-                                detail="调用 hermes config set 失败: %s" % e)
-        if proc.returncode != 0:
-            raise HTTPException(
-                status_code=500,
-                detail="写入 %s 失败: %s" % (key, (proc.stderr or proc.stdout or "").strip()))
+
+    # ── ① 跟现值比，只留真正变了的 ──
+    current = _read_config_yaml()
+    pending = []
+    for key, val in (settings or {}).items():
+        if key not in current:
+            pending.append((key, val))
+            continue
+        old = current[key]
+        # **列表比较要按顺序** —— 用户重新排了序也算「变了」
+        if isinstance(old, list) or isinstance(val, list):
+            if _as_list(old) != _as_list(val):
+                pending.append((key, val))
+            continue
+        # **数字/字符串比较要归一** —— CLI 回读可能是 "653"，
+        # 前端传回来的是 653（int）→ 不归一会误判成「变了」
+        if str(old) != str(val):
+            pending.append((key, val))
+
+    if not pending:
+        return
+
+    # ── ② 并行写 ──
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _one(item):
+        key, val = item
+        cmd = _cli_cmd(hermes) + ["config", "set", base + key, _cli_value(val)]
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=60,
+            cwd=os.path.join(_hermes_home(), "hermes-agent"))
+        return key, proc
+
+    errors = []
+    with ThreadPoolExecutor(max_workers=min(8, len(pending))) as pool:
+        for key, proc in pool.map(_one, pending):
+            if proc.returncode != 0:
+                errors.append("%s: %s" % (
+                    key, (proc.stderr or proc.stdout or "").strip()))
+    if errors:
+        raise HTTPException(status_code=500,
+                            detail="写入配置失败: " + "; ".join(errors))
+
+
+def _as_list(val: Any) -> list:
+    """把配置值归一成列表（比较用）。"""
+    if val is None:
+        return []
+    if isinstance(val, (list, tuple)):
+        return [str(v).strip() for v in val]
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                return [str(v).strip() for v in json.loads(s)]
+            except Exception:
+                pass
+        return [x.strip() for x in s.split(",") if x.strip()]
+    return [str(val)]
 
 
 def _cli_value(val: Any) -> str:
@@ -647,6 +712,8 @@ def get_config() -> Dict[str, Any]:
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "keywords": [],
     "city": "653",
+    # **多城市（填城市名）** —— 空 = 只用上面的 city
+    "cities": [],
     "boss_city": "101210100",
     "min_score": 50,
     "max_jobs_per_run": 30,
