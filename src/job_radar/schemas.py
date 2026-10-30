@@ -196,3 +196,35 @@ RESUME_LIST = {
         },
     },
 }
+
+
+DIRECTIONS = {
+    "name": "job_radar_directions",
+    "description": (
+        "**方向评估** —— 确定用户能投哪些方向（电商运营/建筑施工管理/AI产品开发…）。"
+        "两种用法："
+        "① 不带参数调用 → 返回经历摘要 + 候选方向表 + 评估提示，"
+        "你读完后自己判断该投哪几个方向；"
+        "② 带 directions 参数调用 → 保存选好的方向，之后每天只推这些方向。"
+        "选方向的原则：**看用户凭什么能投**（干过什么、干了多久、能不能上手），"
+        "别贪多，1-4 个就够。"
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "directions": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "可选。带这个参数就是**保存**模式：把选定方向写进配置。"
+                    "例：[\"电商运营\", \"建筑施工管理\"]。不带 = 评估模式（只读）。"
+                ),
+            },
+            "max_per_direction": {
+                "type": "integer",
+                "description": "可选，每个方向每天推几条，默认 5",
+            },
+        },
+    },
+}
+

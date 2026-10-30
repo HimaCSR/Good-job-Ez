@@ -31,6 +31,8 @@ def register(ctx):
                       schema=schemas.RESUME_OPTIMIZE, handler=tools.resume_optimize)
     ctx.register_tool(name="job_radar_resume_list", toolset="job_radar",
                       schema=schemas.RESUME_LIST, handler=tools.resume_list)
+    ctx.register_tool(name="job_radar_directions", toolset="job_radar",
+                      schema=schemas.DIRECTIONS, handler=tools.directions)
 
     # 插件自带的技能文件，agent 可以 skill_view("job-radar:usage") 载入
     skills_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "skills")
@@ -40,4 +42,4 @@ def register(ctx):
             if os.path.isdir(os.path.join(skills_dir, child)) and os.path.exists(skill_md):
                 ctx.register_skill(child, skill_md)
 
-    logger.info("job-radar 已注册：8 个工具")
+    logger.info("job-radar 已注册：9 个工具")

@@ -73,6 +73,38 @@ CREATE TABLE IF NOT EXISTS experiences (
   created TEXT
 );
 
+-- **运行时状态** —— 键值对（防止同一个时间点重复触发）
+--
+-- ## 为什么需要
+--
+-- 「每天 09:00 抓、09:30 推」——
+-- cron 每 10 分钟醒一次，**09:00 那次会连续命中 09:10、09:20** →
+-- 抓取跑 3 遍 → 浪费请求、可能撞风控。
+--
+-- → 记下「上次触发时间」，同一个时间点只触发一次。
+CREATE TABLE IF NOT EXISTS runtime_state (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated TEXT
+);
+
+-- **方向推送状态** —— 记住每个方向上次什么时候推过
+--
+-- ## 为什么需要
+--
+-- 用户诉求：「根据可选方向每天只推荐**单个方向**中评分最高的 5 条」
+--
+-- → 每天推**一个**方向 → 要记住**上次推的是哪个**，
+--   不然每次都是最高分那个方向 → 别的方向永远轮不上。
+--
+-- 记「上次推的时间」还能做**冷却**（N 天内不重复推同一个方向）。
+CREATE TABLE IF NOT EXISTS direction_pushes (
+  direction TEXT PRIMARY KEY,
+  last_push_at TEXT,      -- ISO 时间
+  last_score INTEGER,     -- 上次推的该方向最高分
+  push_count INTEGER DEFAULT 0
+);
+
 -- 投递三道门：一次性确认令牌
 CREATE TABLE IF NOT EXISTS apply_tokens (
   token TEXT PRIMARY KEY,
@@ -108,6 +140,16 @@ def _ensure_columns(conn):
     # 没有它 → 抓不到 JD → 简历优化只能靠岗位标题猜要求。
     if "security_id" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN security_id TEXT")
+    # **direction** —— 岗位所属方向
+    #
+    # 用户诉求：「电商运营（速卖通、ozon、虾皮等国际电商平台相关的
+    # 运营工作归为一类）、建筑施工管理等方向归为一类、AI产品开发等方向
+    # 归为一类」→ **推荐单位是「方向」**。
+    #
+    # 老库没这列 → 必须补 —— 不补 → `INSERT` 带 direction 直接报
+    # 「table jobs has no column named direction」，**整次抓取全废**。
+    if "direction" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN direction TEXT")
 
 
 class _Conn(sqlite3.Connection):
@@ -173,15 +215,54 @@ def rescore_all(profile, experiences=None, score_fn=None):
     with _conn() as conn:
         for j in jobs:
             scored = score_fn(j, profile, experiences=experiences)
+            # **顺带回填方向** ——
+            #
+            # 老岗位入库时还没有 `direction` 列（分类是后加的）
+            # → 不回填的话它们全是空 → 分组时全落到「其它」
+            # → 推送推出来一堆「其它」。
+            # ── **总是重算方向** ──
+            #
+            # ## 为什么不是「有就不改」
+            #
+            # 规则表会改（今天加「纯电商词」，明天加「供应链物流」）
+            # → 已分类的老岗位**不会自动重分**
+            # → 「电商运营」永远留在「其它」里。
+            #
+            # 本机踩过：加了规则后跑 rescore，「其它」还是 33 条
+            # —— 因为 `COALESCE(NULLIF(direction,''), ?)` 保留了旧值。
+            #
+            # 重算很便宜（纯字符串匹配）→ 每次 rescore 都刷一遍。
+            direction = _classify(j)
             conn.execute(
-                "UPDATE jobs SET score=?, reasons=?, missing=? WHERE job_id=?",
+                """UPDATE jobs SET score=?, reasons=?, missing=?,
+                          direction=?
+                   WHERE job_id=?""",
                 (scored["score"],
                  json.dumps(scored.get("reasons") or [], ensure_ascii=False),
                  json.dumps(scored.get("missing") or [], ensure_ascii=False),
+                 direction,
                  j.get("job_id")),
             )
             changed += 1
     return changed
+
+
+def _classify(job):
+    """岗位 → 方向名（分类失败返回 "其它"）。
+
+    **放在 storage 里** —— `rescore_all` 要用，
+    不能依赖 tools（会循环导入）。
+    """
+    try:
+        try:
+            from .direction_catalog import classify
+        except ImportError:
+            from direction_catalog import classify
+        text = " ".join(str(job.get(k) or "") for k in
+                        ("title", "description", "jd_text", "company"))
+        return classify(text)
+    except Exception:
+        return "其它"
 
 
 def upsert(job, scored):
@@ -201,8 +282,8 @@ def upsert(job, scored):
             """INSERT INTO jobs
                (job_id, source, title, company, salary, city, experience, degree,
                 skills, url, description, score, reasons, missing,
-                first_seen, last_seen, security_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                first_seen, last_seen, security_id, direction)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(job_id) DO UPDATE SET
                  source=excluded.source, title=excluded.title,
                  company=excluded.company, salary=excluded.salary,
@@ -211,7 +292,8 @@ def upsert(job, scored):
                  url=excluded.url, description=excluded.description,
                  score=excluded.score, reasons=excluded.reasons,
                  missing=excluded.missing, last_seen=excluded.last_seen,
-                 security_id=excluded.security_id""",
+                 security_id=excluded.security_id,
+                 direction=excluded.direction""",
             (jid, job.get("source", ""), job.get("title", ""),
              job.get("company", ""), job.get("salary", ""),
              job.get("area") or job.get("city", ""),
@@ -221,7 +303,10 @@ def upsert(job, scored):
              scored["score"],
              json.dumps(scored.get("reasons") or [], ensure_ascii=False),
              json.dumps(scored.get("missing") or [], ensure_ascii=False),
-             now, now, job.get("security_id", "")))
+             now, now, job.get("security_id", ""),
+             # **方向** —— 电商运营 / 建筑施工管理 / AI产品开发…
+             # （由 direction_catalog 分类后写进来）
+             job.get("direction", "")))
     return is_new
 
 
@@ -653,3 +738,64 @@ def update_resume_after_apply(resume_id, tags=None, source=None, job_id=None):
                       (job_id, resume_id))
         c.execute("UPDATE resumes SET updated = ? WHERE resume_id = ?",
                   (_now(), resume_id))
+
+def mark_direction_pushed(direction, score=0, pushed_at=None):
+    """记录「这个方向今天推过了」。
+
+    ## 为什么
+
+    「每天只推单个方向」→ 要记得**上次推的哪个方向**，
+    否则每次都推最高分的那个 → 其它方向永远轮不上。
+
+    不记的话 → 用户永远只看到一个方向 → 其它方向一个都收不到。
+    """
+    if not direction:
+        return
+    ts = pushed_at or datetime.now().isoformat(timespec="seconds")
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO direction_pushes
+               (direction, last_push_at, last_score, push_count)
+               VALUES (?,?,?,1)
+               ON CONFLICT(direction) DO UPDATE SET
+                 last_push_at=excluded.last_push_at,
+                 last_score=excluded.last_score,
+                 push_count=direction_pushes.push_count + 1""",
+            (direction, ts, int(score or 0)))
+
+
+def direction_push_states():
+    """所有方向的上次推送状态（`{方向: {...}}`）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM direction_pushes").fetchall()
+    return {r["direction"]: dict(r) for r in rows}
+
+
+def last_direction_pushed():
+    """上次推的是哪个方向（按时间最近）。"""
+    with _conn() as conn:
+        row = conn.execute(
+            """SELECT direction, last_push_at FROM direction_pushes
+               ORDER BY last_push_at DESC LIMIT 1""").fetchone()
+    return dict(row) if row else {}
+
+def set_state(key, value):
+    """写运行时状态（键值对）。"""
+    ts = datetime.now().isoformat(timespec="seconds")
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO runtime_state (key, value, updated)
+               VALUES (?,?,?)
+               ON CONFLICT(key) DO UPDATE SET
+                 value=excluded.value, updated=excluded.updated""",
+            (key, str(value), ts))
+
+
+def get_state(key, default=None):
+    """读运行时状态。"""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM runtime_state WHERE key = ?",
+            (key,)).fetchone()
+    return row["value"] if row else default

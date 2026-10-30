@@ -72,6 +72,84 @@ FIELD_MAP = {
 }
 
 
+def _write_config(patch):
+    """把配置写回 Hermes config.yaml（走 CLI，不手写 YAML）。
+
+    ## 为什么走 CLI
+
+    手改 config.yaml 容易缩进错位 —— 写坏一个缩进，
+    整个 `plugins.entries.job-radar` 节点就废了。
+    CLI 会自己建嵌套块、保证缩进正确。
+
+    ## 参数
+
+    `patch` —— `{"directions": ["电商运营"], ...}`（只写这几个键）
+
+    ## 失败怎么办
+
+    **不抛异常** —— 保存方向失败不该让整次评估挂掉。
+    记日志，返回 False，调用方自己决定要不要报错。
+    """
+    import subprocess
+    try:
+        local = os.environ.get("LOCALAPPDATA", "")
+        home = os.path.join(local, "hermes", "hermes-agent")
+        # **CLI 在 .hermes/bin 下**
+        cli = os.path.join(home, ".hermes", "bin",
+                           "hermes.exe" if os.name == "nt" else "hermes")
+        if not os.path.exists(cli):
+            cli = os.path.join(home, ".hermes", "bin", "hermes")
+        if not os.path.exists(cli):
+            log.warning("找不到 hermes CLI，跳过写配置")
+            return False
+        base = "plugins.entries.job-radar.settings."
+        for key, val in (patch or {}).items():
+            if isinstance(val, (list, tuple)):
+                arg = ",".join(str(v) for v in val)
+            elif isinstance(val, bool):
+                arg = "true" if val else "false"
+            else:
+                arg = str(val)
+            cmd = [cli, "config", "set", base + key, arg]
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=60, cwd=home)
+            if proc.returncode != 0:
+                log.warning("写配置 %s 失败: %s", key,
+                            (proc.stderr or proc.stdout or "").strip())
+                return False
+        return True
+    except Exception as exc:
+        log.warning("写配置失败: %s", exc)
+        return False
+
+
+def _classify_direction(job):
+    """岗位 → 方向名（电商运营 / 建筑施工管理 / AI产品开发…）。
+
+    ## 为什么用规则而不是 Agent
+
+    - **可预测** —— 同一个岗位永远同一个方向
+    - **可测试** —— 有单测
+    - **不烧 token** —— 抓几千条岗位不能每条都问 LLM
+
+    Agent 只在**评估用户经历 → 定可选方向**那一步用。
+
+    ## 失败也不致命
+
+    分不出来就返回 "其它" —— 岗位照样入库、照样打分。
+    """
+    try:
+        try:
+            from . import direction_catalog
+        except ImportError:      # 脱离包单独导入时（单测）
+            import direction_catalog
+        text = " ".join(str(job.get(k) or "") for k in
+                        ("title", "description", "jd_text", "company"))
+        return direction_catalog.classify(text)
+    except Exception:
+        return "其它"
+
+
 def _normalize(job, source):
     """把某个站的字段映射成统一词表。"""
     m = FIELD_MAP.get(source, FIELD_MAP["zhaopin"])
@@ -248,6 +326,15 @@ def scan(args, **kwargs):
                         seen += 1
                         scored = score_job(job, prof, experiences=experiences)
                         job["score"] = scored["score"]
+                        # **分类到方向** —— 电商运营 / 建筑施工管理 / AI产品开发…
+                        #
+                        # 用户诉求：「电商运营（速卖通、ozon、虾皮等国际电商
+                        # 平台相关的运营工作归为一类）、建筑施工管理等方向
+                        # 归为一类、AI产品开发等方向归为一类」
+                        #
+                        # → **推荐单位是「方向」**，不是标题字面。
+                        # → 每天推**单个方向**里评分最高的 5 条。
+                        job["direction"] = _classify_direction(job)
                         if storage.upsert(job, scored):
                             new_count += 1
                         if scored["score"] >= min_score:
@@ -361,6 +448,93 @@ def mark(args, **kwargs):
         return json.dumps({"error": "标记失败: %s" % e}, ensure_ascii=False)
 
 
+def directions(args, **kwargs):
+    """**方向评估** —— Agent 用它确定「用户可选方向」。
+
+    ## 两种用法
+
+    **① 评估（不带 directions 参数）**
+
+    返回：经历摘要 + 候选方向表 + 评估提示。
+    Agent 读完自己判断该投哪几个方向。
+
+    **② 保存（带 directions 参数）**
+
+    把选好的方向写进配置，之后**每天只推这些方向**。
+
+    ## 为什么需要它
+
+    用户诉求：「由 Agent 评估用户经历，确定用户可选方向、
+    根据可选方向每天只推荐单个方向中评分最高的 5 条」。
+
+    ## 为什么岗位分类不用 Agent
+
+    一次抓几百上千条岗位 → 每条问一次 LLM = 慢 + 烧钱 + 不一致。
+    → 岗位分类走**规则**（`direction_catalog`），Agent 只评**方向**。
+    """
+    try:
+        try:
+            from . import direction_evaluate, storage as _st
+        except ImportError:
+            import direction_evaluate
+            import storage as _st
+
+        experiences = _st.list_experiences()
+        # **岗位池里的方向分布** —— 有机会投的方向
+        rows = []
+        try:
+            with _st._conn() as conn:
+                rows = conn.execute(
+                    """SELECT direction, COUNT(*) AS c, MAX(score) AS top
+                       FROM jobs WHERE direction IS NOT NULL
+                         AND direction != ''
+                       GROUP BY direction""").fetchall()
+        except Exception:
+            rows = []
+        job_dirs = [{"direction": r["direction"], "score": r["top"],
+                     "count": r["c"]} for r in rows]
+
+        candidates = direction_evaluate.candidate_directions(
+            experiences, job_dirs)
+
+        # ── ② 保存模式 ──
+        if "directions" in args and args.get("directions") is not None:
+            chosen = [str(d).strip() for d in (args.get("directions") or [])
+                      if str(d).strip()]
+            # **去重 + 保序**
+            seen = set()
+            uniq = []
+            for d in chosen:
+                if d not in seen:
+                    seen.add(d)
+                    uniq.append(d)
+            cfg = load_config()
+            cfg["directions"] = uniq
+            _write_config(cfg)
+            return json.dumps({
+                "ok": True,
+                "saved": uniq,
+                "count": len(uniq),
+                "note": "已保存可选方向；之后每天只推这些方向里评分最高的 %s 条"
+                        % (args.get("max_per_direction") or 5),
+            }, ensure_ascii=False)
+
+        # ── ① 评估模式 ──
+        summary = direction_evaluate.summarize_experiences(experiences)
+        hint = direction_evaluate.evaluate_hint(summary, candidates)
+        cur = (load_config() or {}).get("directions") or []
+        return json.dumps({
+            "experiences": summary,
+            "candidates": candidates,
+            "current_directions": cur,
+            "hint": hint,
+            "note": "读 hint 评估后，用 directions 参数调一次保存",
+        }, ensure_ascii=False)
+    except Exception as e:
+        log.exception("方向评估失败")
+        return json.dumps({"error": "方向评估失败: %s" % e}, ensure_ascii=False)
+
+
 def push(args, **kwargs):
     """生成待推送的消息序列（≤50 字/条，URL 除外）。
 
@@ -382,19 +556,59 @@ def push(args, **kwargs):
             jobs = storage.unpushed_jobs(days=days, min_score=min_score, limit=50)
         else:
             jobs = storage.all_jobs(limit=50, min_score=min_score)
-        msgs = push_mod.build_push(jobs, min_score=min_score, max_jobs=max_jobs)
+
+        # ── **单个方向**里评分最高的 N 条 ──
+        #
+        # 用户诉求：「根据可选方向每天只推荐**单个方向**中评分最高的 5 条」
+        #
+        # ## 为什么不是所有方向混着推
+        #
+        # 一天 30 条（多方向混推）→ 用户看不过来 → 等于没推。
+        # 一天 5 条（一个方向）→ 看得完，且**明天换另一个方向**。
+        #
+        # `max_jobs` 现在是**每个方向**的条数（默认 5）。
+        #
+        # **用户选定的方向**（`cfg["directions"]`）优先 ——
+        # 用户说投啥就投啥，别推他没选的方向。
+        # **用户选定的方向** —— profile 优先，settings 兜底
+        #
+        # 方向存**画像**（跟经历、方向权重一起）→ 这里读 profile。
+        # settings 里也允许写（方便老配置）。
+        cfg_directions = []
+        try:
+            prof_now = load_profile()
+            cfg_directions = list(prof_now.get("directions") or [])
+        except Exception:
+            pass
+        if not cfg_directions:
+            cfg_directions = list(cfg.get("directions") or [])
+        last = storage.last_direction_pushed()
+        picked = push_mod.build_daily_push(
+            jobs, max_per_direction=max_jobs, directions=cfg_directions,
+            last_direction=last.get("direction") or "")
+
+        msgs = picked["messages"]
+        direction = picked["direction"]
+        top_jobs = picked["jobs"]
+
         # 标记已推送 —— 放在生成之后，投递由 cron 负责
         pushed = []
         if only_new:
-            picked = [j for j in jobs if (j.get("score") or 0) >= min_score][:max_jobs]
-            pushed = [j.get("job_id") for j in picked if j.get("job_id")]
+            pushed = [j.get("job_id") for j in top_jobs if j.get("job_id")]
             storage.mark_pushed(pushed)
-        log.info("推送内容生成 jobs=%d msgs=%d only_new=%s 已标记=%d",
-                 len(jobs), len(msgs), only_new, len(pushed))
+        # **记下这次推了哪个方向** —— 下次轮换到别的方向
+        if direction:
+            storage.mark_direction_pushed(
+                direction, max((j.get("score") or 0) for j in top_jobs)
+                if top_jobs else 0)
+        log.info("推送内容生成 jobs=%d msgs=%d only_new=%s 方向=%s 已标记=%d",
+                 len(jobs), len(msgs), only_new, direction, len(pushed))
         return json.dumps({
             "count": len(msgs),
             "messages": msgs,
             "job_ids": pushed,
+            "direction": direction,
+            "ranking": picked.get("ranking") or [],
             "note": "按顺序逐条发送；每条已≤50字（URL 除外）",
         }, ensure_ascii=False)
     except Exception as e:

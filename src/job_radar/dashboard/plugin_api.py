@@ -54,6 +54,10 @@ _SIBLINGS = (
     "profile_derive",
     # **BOSS 城市码表** —— `/cities` 要返回两站并集
     "boss_city_codes",
+    # **方向分类** —— 把岗位归到「电商运营/建筑施工管理/AI产品开发」
+    # **调度** —— 用户自定义抓取/推送时间
+    # **方向评估** —— Agent 评估经历 → 可选方向
+    "direction_catalog", "schedule", "direction_evaluate",
 )
 
 
@@ -579,6 +583,13 @@ class ProfileIn(BaseModel):
     #
     # 不加这个字段 → Pydantic 会把前端传来的权重**直接丢掉**。
     direction_weights: Dict[str, float] = Field(default_factory=dict)
+    # **可选方向** —— 用户能投的方向（电商运营/建筑施工管理/AI产品开发…）
+    #
+    # 用户诉求：「由 Agent 评估用户经历，确定用户可选方向、
+    # 根据可选方向每天只推荐单个方向中评分最高的 5 条」
+    #
+    # **空 = 全方向都算**（推分数最高的那个）。
+    directions: List[str] = Field(default_factory=list)
 
 
 class SettingsIn(BaseModel):
@@ -752,47 +763,140 @@ def _normalize_job(job: Dict[str, Any]) -> Dict[str, Any]:
         out["area"] = out.get("city") or ""
     if not out.get("city"):
         out["city"] = out.get("area") or ""
-    # **岗位类型标识** —— 前端按它做「同类型只推前 3」
+    # ── **方向**（主）──
     #
-    # **必须后端算** —— 归一化规则（去职级后缀、去括号…）
-    # 有一套，Python 和 JS 各写一份必然分家。
+    # 用户诉求：「电商运营（速卖通、ozon、阿里国际站、虾皮等国际电商
+    # 平台相关的运营工作归为一类）、建筑施工管理等方向归为一类、
+    # AI产品开发等方向归为一类」
     #
-    # 前端拿 `type_key` 直接分组，不用再猜。
+    # → **推荐单位是「方向」** —— 前端按它分组。
     #
-    # ## 怎么定类型
+    # 数据库里存着（抓取时分类好的）→ 直接读。
+    # 没存（老数据没回填）→ 现算一个。
+    out["direction"] = (out.get("direction") or "").strip()
+    if not out["direction"]:
+        try:
+            direction_catalog = _sibling("direction_catalog")
+            hay = " ".join(str(out.get(k) or "") for k in
+                           ("title", "jd_text", "description", "company"))
+            out["direction"] = direction_catalog.classify(hay)
+        except Exception:
+            out["direction"] = ""
+
+    # ── **类型标识**（辅）──
     #
-    # **优先用「命中的方向词」** —— 比标题归一化准：
+    # **标题字面归一化** —— 同一措辞的不同层级
+    # （跨境电商运营助理 / 专员 / 主管 → 同一个 type_key）。
     #
-    # ```
-    # 「ebay（易贝）shopee（虾皮） 跨境电商运营」
-    #   标题归一化 → ebayshopee跨境电商运营  ← 平台前缀挡着，不是同一类
-    #   按方向词   → 跨境电商运营            ← 对
-    # ```
+    # 跟 `direction` 的区别：
     #
-    # 平台前缀（ebay/shopee/amazon…）是**销售渠道**，不是**岗位类型**。
+    # | | 粒度 | 例子 |
+    # | --- | --- | --- |
+    # | `direction` | **方向**（粗） | 速卖通运营、ozon运营 → 电商运营 |
+    # | `type_key` | **同措辞**（细） | 跨境电商运营助理 → 跨境电商运营 |
+    #
+    # 前端分组用 `direction`（用户诉求），`type_key` 留着做同类型折叠。
     try:
         matcher = _sibling("matcher")
-        prof = _read_profile()
-        dw = prof.get("direction_weights") or {}
-        dirs = list(dw.keys())
-        dirs += list(prof.get("title_keywords_primary") or [])
-        dirs += list(prof.get("title_keywords") or [])
-        hay = " ".join(str(out.get(k) or "") for k in
-                       ("title", "jd_text", "description", "company"))
-        out["type_key"] = matcher.job_type_by_direction(
-            out.get("title") or "", haystack=hay, direction_words=dirs,
-            direction_weights=dw)
+        out["type_key"] = matcher.job_type_key(out.get("title") or "")
     except Exception:
-        try:
-            out["type_key"] = _sibling("matcher").job_type_key(
-                out.get("title") or "")
-        except Exception:
-            out["type_key"] = ""
+        out["type_key"] = ""
     return out
 
 
+@router.get("/directions")
+def list_directions() -> Dict[str, Any]:
+    """**方向列表** —— 设置页让用户选「能投哪些方向」。
+
+    ## 返回
+
+    ```json
+    {"directions": [{"name": "电商运营", "count": 81, "top_score": 80,
+                     "from_experience": true, "selected": true}],
+     "selected": ["电商运营"], "unknown_count": 19}
+    ```
+
+    ## 为什么按岗位数排序
+
+    **岗位多的方向才有得选** —— 只有 1 条岗位的方向推出来也没意义。
+
+    `from_experience` 标出「用户做过」的方向 —— 那是最该选的。
+    """
+    storage = _sibling("storage")
+    try:
+        direction_catalog = _sibling("direction_catalog")
+    except Exception:
+        direction_catalog = None
+    prof = _read_profile()
+
+    rows = []
+    try:
+        with storage._conn() as conn:
+            rows = conn.execute(
+                """SELECT direction, COUNT(*) AS c, MAX(score) AS top
+                   FROM jobs WHERE direction IS NOT NULL AND direction != ''
+                   GROUP BY direction""").fetchall()
+    except Exception:
+        rows = []
+
+    # **经历里出现过的方向** —— 用户做过
+    from_exp = set()
+    try:
+        experiences = storage.list_experiences()
+        for exp in experiences:
+            text = " ".join([str(exp.get("title") or ""),
+                             str(exp.get("company") or ""),
+                             " ".join(str(b) for b in (exp.get("bullets") or []))])
+            if direction_catalog is not None and text.strip():
+                d = direction_catalog.classify(text)
+                if d and d != direction_catalog.UNKNOWN:
+                    from_exp.add(d)
+    except Exception:
+        pass
+
+    selected = list(prof.get("directions") or [])
+    out = []
+    for r in rows:
+        out.append({
+            "name": r["direction"],
+            "count": r["c"],
+            "top_score": r["top"],
+            "from_experience": r["direction"] in from_exp,
+            "selected": r["direction"] in selected,
+        })
+    out.sort(key=lambda x: (not x["from_experience"], -x["count"], x["name"]))
+    return {"directions": out, "selected": selected}
+
+
+@router.post("/directions")
+def save_directions(body: Dict[str, Any]) -> Dict[str, Any]:
+    """**保存可选方向** —— 之后每天只推这些方向。
+
+    ## 为什么不写在 settings 里
+
+    方向是**画像的一部分**（跟经历、方向权重一起），
+    存在 profile.yaml 里 → 改方向不用动 Hermes 全局配置。
+
+    → 但**推送时也要读到** → `config.load_profile()` 里有就行。
+    """
+    raw = body.get("directions")
+    if raw is None:
+        raise HTTPException(status_code=400, detail="directions 不能为空")
+    chosen = []
+    seen = set()
+    for d in (raw or []):
+        d = str(d).strip()
+        if d and d not in seen:
+            seen.add(d)
+            chosen.append(d)
+    prof = _read_profile()
+    prof["directions"] = chosen
+    _write_profile(prof)
+    return {"ok": True, "directions": chosen, "count": len(chosen)}
+
+
 @router.get("/jobs")
-def list_jobs(limit: int = 120, min_score: int = 0,
+def list_jobs(limit: int = 30, min_score: int = 0,
               per_type: int = 3) -> Dict[str, Any]:
     """岗位池（按匹配度倒序）—— **同类型只给最高分的 N 条**。
 

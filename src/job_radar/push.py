@@ -144,3 +144,141 @@ def build_push(jobs, min_score=0, max_jobs=3):
     for i, j in enumerate(picked, 1):
         msgs.extend(format_job(j, i))
     return msgs
+
+
+# ── 方向选择 ────────────────────────────────────────────────────────────────
+#
+# ## 用户诉求（原文）
+#
+# > 由 Agent 评估用户经历，确定用户可选方向、根据可选方向每天只推荐
+# > **单个方向中评分最高的 5 条**简历内容、按评分进行排序。
+#
+# ## 关键点
+#
+# **单个方向** —— 一天只推一个方向，不是所有方向混着推。
+#
+# **为什么这样对**
+#
+# 用户同时能投的方向有好几个（电商运营 + 建筑施工管理），
+# 但**一天全推 = 刷屏** —— 30 条消息，用户根本看不过来。
+#
+# → 每天推**一个**方向 **5** 条 → 看得完，且每天换一个方向轮着来。
+#
+# ## 选哪个方向
+#
+# **按方向内最高分排** —— 哪个方向当前有更好的岗位，就推哪个。
+# 分数相同则按「上次推这个方向的时间」——**轮着来**，别老推同一个。
+
+def pick_direction(jobs, last_direction=None, last_push_at=None,
+                   directions=None):
+    """在一批岗位里选出**今天要推的方向**。
+
+    ## 参数
+
+    - `jobs` —— 候选岗位（已按分数倒序）
+    - `last_direction` —— 上次推的方向
+    - `last_push_at` —— 上次推这个方向的时间（ISO 字符串）
+    - `directions` —— **用户选定的可选方向**（为空 = 全都算）
+
+    ## 返回
+
+    `{"direction": 方向名, "jobs": [该方向的岗位, 按分数倒序], "ranking": [...]}`
+    `direction` 为空表示没有可推的岗位。
+    """
+    if not jobs:
+        return {"direction": "", "jobs": [], "ranking": []}
+
+    # **按方向分组**
+    groups = {}
+    for j in jobs:
+        d = (j.get("direction") or "").strip()
+        # ── **「其它」不参与** ──
+        #
+        # 「其它」= 规则分不出来的（标题太泛：「运营」「线上运营」「实习生」）
+        # → **推出来用户也不知道是啥方向**
+        # → 宁可推别的方向，也别推「其它」。
+        #
+        # 本机踩过：第一次跑 cron，推出来的是
+        # 「【其它】跨境电商运营助理」—— 方向标错，用户一脸懵。
+        if not d or d == "其它":
+            continue
+        groups.setdefault(d, []).append(j)
+
+    # **只保留用户选定的方向** —— 用户说投啥就投啥
+    if directions:
+        allow = set(directions)
+        groups = {d: v for d, v in groups.items() if d in allow}
+
+    if not groups:
+        return {"direction": "", "jobs": [], "ranking": []}
+
+    # **排序规则**
+    #
+    # 1. **方向内最高分** —— 高的先推
+    # 2. **上次推过的降权** —— 让别的方向有机会
+    #    （降权只影响**方向之间**的排序，不影响方向内部）
+    ranking = []
+    for d, items in groups.items():
+        top = max((i.get("score") or 0) for i in items) if items else 0
+        count = len(items)
+        ranking.append({"direction": d, "top_score": top, "count": count,
+                        "jobs": items})
+    # **排序键**：上次推过的降权 → 其余按分数降序
+    #
+    # ## 降权怎么表达
+    #
+    # 用**排序键**表达，不用「减分」——
+    # 减分的话，分数差得多的方向会被拉回来，
+    # 降权就名存实亡了。
+    #
+    # **降权 = 排到该组最后**（不是减 1000 分）。
+    def sort_key(item):
+        d = item["direction"]
+        # **上次推过的排最后**（1 = 最后，0 = 正常）
+        last = 1 if (last_direction and d == last_direction) else 0
+        return (last, -item["top_score"], -item["count"], d)
+    ranking.sort(key=sort_key)
+
+    chosen = ranking[0]
+    # **方向内按分数倒序**
+    picked = sorted(chosen["jobs"], key=lambda j: -(j.get("score") or 0))
+    for r in ranking:
+        r.pop("jobs", None)
+    return {"direction": chosen["direction"], "jobs": picked, "ranking": ranking}
+
+
+def build_daily_push(jobs, max_per_direction=5, directions=None,
+                     last_direction=None, last_push_at=None):
+    """**单个方向中评分最高的 N 条** —— 用户要的核心逻辑。
+
+    ## 返回
+
+    ```python
+    {"direction": "电商运营", "messages": [...], "jobs": [...],
+     "ranking": [...]}
+    ```
+
+    ## 为什么只推一个方向
+
+    用户诉求原文：「根据可选方向每天只推荐**单个方向**中评分最高的 5 条」。
+
+    一天推 30 条（多个方向混着）→ 用户看不过来 → **等于没推**。
+    一天推 5 条（一个方向）→ 看得完 → 而且**明天换另一个方向**。
+    """
+    picked = pick_direction(jobs, last_direction=last_direction,
+                            last_push_at=last_push_at,
+                            directions=directions)
+    direction = picked["direction"]
+    if not direction:
+        return {"direction": "", "messages": [], "jobs": [], "ranking": []}
+
+    top = picked["jobs"][:max_per_direction]
+    msgs = []
+    for j in top:
+        msgs.extend(format_job(j))
+    return {
+        "direction": direction,
+        "messages": msgs,
+        "jobs": top,
+        "ranking": picked["ranking"],
+    }

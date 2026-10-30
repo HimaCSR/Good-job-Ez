@@ -21,8 +21,11 @@ config_schema:
   sites: {type: list, default: ["zhaopin"], description: "启用哪些站：zhaopin / boss"}
   request_gap_seconds: {type: int, default: 12, description: "两次请求之间的基准间隔（秒）"}
   rounds_per_day: {type: int, default: 4, description: "每天自动抓取几次"}
-  push_max: {type: int, default: 3, description: "每次最多推几条岗位到 QQ"}
+  push_max: {type: int, default: 5, description: "每次最多推几条岗位到 QQ（**单个方向**里的条数）"}
   push_new_only: {type: bool, default: true, description: "只推送新岗位，不重复推旧的"}
+  directions: {type: list, default: [], description: "**可选方向** —— 用户能投的方向（电商运营/建筑施工管理/AI产品开发…）。**空 = 全方向都算**。由 Agent 调 job_radar_directions 评估后写入"}
+  scan_times: {type: list, default: ["09:00", "13:00", "17:00", "21:00"], description: "**每天自动抓取的时间点**（HH:MM）。空 = 不自动抓"}
+  push_times: {type: list, default: ["09:30", "17:30"], description: "**每天推送的时间点**（HH:MM）。空 = 不自动推"}
   notify_on_failure: {type: bool, default: true, description: "抓取失败时通知我"}
   active_hours: {type: str, default: "09:00 - 22:00", description: "只在这些时段内抓取"}
   apply_zhaopin: {type: bool, default: false, description: "允许在智联招聘投递简历（第一道门，默认关）"}

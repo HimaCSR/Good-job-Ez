@@ -38,14 +38,30 @@ def set_context(ctx):
 
 
 def _defaults():
-    """没有 ctx、也读不到 Hermes 配置时的兜底。"""
+    """没有 ctx、也读不到 Hermes 配置时的兜底。
+
+    ## `scan_times` / `push_times`
+
+    **用户自定义抓取/推送时间** —— 每天几点抓、几点推。
+
+    空列表 = **不按点自动跑**（cron 脚本会静默退出）。
+
+    cron 每 10 分钟醒一次，脚本自己判断现在该不该干活
+    （见 `schedule.should_run`）—— 同一时间点只触发一次。
+    """
     return {"keywords": [], "city": "653", "cities": [],
             "boss_city": "101210100",
             "min_score": 50, "max_jobs_per_run": 30, "mock": False,
             "sites": ["zhaopin"], "request_gap_seconds": 12,
-            "rounds_per_day": 4, "push_max": 3,
+            "rounds_per_day": 4,
+            # **每方向推几条** —— 单个方向里评分最高的 N 条
+            "push_max": 5,
             "push_new_only": True, "notify_on_failure": True,
-            "active_hours": "09:00 - 22:00"}
+            "active_hours": "09:00 - 22:00",
+            # **用户可选方向** —— 每天只推这些方向里评分最高的
+            "directions": [],
+            # **抓取/推送时间点**
+            "scan_times": [], "push_times": []}
 
 
 def _read_settings_from_hermes():

@@ -156,14 +156,7 @@ function useConfig(ctx) {
 function useJobs(ctx, minScore) {
   return useQuery({
     queryKey: ['job-radar', 'jobs', minScore],
-    // **取 120 条** —— 不是 30。
-    //
-    // 「同类型只推前 3」要**有别的类型可选**：
-    // 池子顶部 30 条常常全是同一个方向（实测 30/30 都是跨境电商运营）
-    // → 只取 30 条 → 去重后只剩 3 条 → 用户看不到别的机会。
-    //
-    // 取 120 条 → 去重后能覆盖多种类型。
-    queryFn: async () => ctx.rest('/jobs?limit=120&min_score=' + (minScore || 0)),
+    queryFn: async () => ctx.rest('/jobs?limit=30&min_score=' + (minScore || 0)),
     refetchInterval: 30000,
   })
 }
@@ -973,6 +966,16 @@ function JobCard({ job, ctx }) {
             jsxs('div', {
               className: 'mt-1.5 flex flex-wrap gap-2 text-xs text-(--ui-text-secondary)',
               children: [
+                // ── **方向标签** ──
+                //
+                // 用户诉求：「电商运营（速卖通、ozon、虾皮等）归为一类」
+                // → 用户一眼能看出**这是哪类岗位**。
+                job.direction && job.direction !== '其它'
+                  ? jsx('span', {
+                      className: 'rounded border border-(--ui-stroke-tertiary) px-1.5 py-0.5 text-[0.6875rem] text-(--ui-text-tertiary)',
+                      children: job.direction,
+                    })
+                  : null,
                 job.salary && jsx('span', { children: '💰 ' + job.salary }),
                 job.area && jsx('span', { children: '📍 ' + job.area }),
                 job.experience && jsx('span', { children: '💼 ' + job.experience }),
@@ -1550,21 +1553,38 @@ function RecommendView({ ctx, cfg }) {
   //
   // **为什么在前端做** —— 折叠/展开是**纯前端行为**，
   // 后端不知道用户是不是在看折叠区。
-  const seenTypes = {}
+  // ── **按「方向」分组** ──
+  //
+  // 用户诉求：「电商运营（速卖通、ozon、阿里国际站、虾皮等国际电商平台
+  // 相关的运营工作归为一类）、建筑施工管理等方向归为一类、
+  // AI产品开发等方向归为一类」
+  //
+  // → **推荐单位是「方向」**，不是标题字面。
+  // → 同一方向里最多 PER_TYPE 条 → 不会 12 条全是跨境电商运营。
+  //
+  // 「其它」（规则分不出来的）**不参与去重也不展示在顶部**
+  // —— 推出来用户也不知道是啥方向。
+  const seenDirs = {}
   const deduped = []
   const overflow = []
   for (const j of ranked) {
-    const key = (j && j.type_key) || ''
-    if (!key) { deduped.push(j); continue }   // 没有类型 → 不参与去重
-    const n = seenTypes[key] || 0
-    seenTypes[key] = n + 1
+    const dir = (j && j.direction) || ''
+    if (!dir || dir === '其它') { overflow.push(j); continue }
+    const n = seenDirs[dir] || 0
+    seenDirs[dir] = n + 1
     if (n < PER_TYPE) deduped.push(j)
     else overflow.push(j)
   }
   const topJobs = showAllJobs ? ranked : deduped.slice(0, TOP_N)
   const restCount = Math.max(0, (showAllJobs ? ranked.length : deduped.length) - TOP_N)
-  // **同类型折叠掉的条数** —— 告诉用户「还有 N 条同类型的在下面」
+  // **被折叠掉的条数** —— 告诉用户「还有 N 条在下面」
   const dupCount = overflow.length
+  // **每个方向各留了几条** —— 给用户看清楚
+  const dirCounts = {}
+  for (const j of deduped) {
+    const d = (j && j.direction) || ''
+    if (d) dirCounts[d] = (dirCounts[d] || 0) + 1
+  }
   React.useEffect(() => { setLocal(settings) }, [settings])
   const save = useMutation({
     mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
@@ -1576,6 +1596,26 @@ function RecommendView({ ctx, cfg }) {
     setLocal(next)
     save.mutate(next)
   }
+
+  // ── **保存可选方向**（存 profile）──
+  const saveDirections = useMutation({
+    mutationFn: async (dirs) => ctx.rest('/directions', {
+      method: 'POST', body: { directions: dirs },
+    }),
+    onSuccess: (r) => {
+      // **本地也要更新** —— 否则界面上的选中态跟实际存的脱节
+      setLocal((s) => ({ ...s, directions: (r && r.directions) || [] }))
+      qc.invalidateQueries({ queryKey: ['job-radar', 'directions'] })
+      const n = (r && r.directions) || []
+      host.notify({
+        kind: 'success',
+        message: n.length
+          ? ('已保存 ' + n.length + ' 个方向：' + n.join('、'))
+          : '已清空方向 —— 之后按分数推分数最高的方向',
+      })
+    },
+    onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
+  })
 
   return jsxs(Fragment, {
     children: [
@@ -1628,8 +1668,8 @@ function RecommendView({ ctx, cfg }) {
                           !showAllJobs && dupCount > 0
                             ? jsx('span', {
                                 className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
-                                children: '（同类只保留前 ' + PER_TYPE
-                                  + ' 条，另有 ' + dupCount + ' 条同类已折叠）',
+                                children: '（每个方向只保留前 ' + PER_TYPE
+                                  + ' 条，另有 ' + dupCount + ' 条已折叠）',
                               })
                             : null,
                         ],
@@ -2133,8 +2173,24 @@ function SettingsView({ ctx, cfg }) {
     onError: (e) => host.notify({ kind: 'error', message: String(e && e.message || e) }),
   })
 
+  // ── **保存设置** ──
+  //
+  // ## 为什么多写两个 `*_disabled` 标记
+  //
+  // `hermes config get` **不输出空列表的键** ——
+  // cron 脚本读不到「用户把时间清空了」这件事，
+  // 就会用默认档填回去 → **用户清空没用**。
+  //
+  // → 清空时同时写 `scan_times_disabled: true`，
+  //   cron 脚本看到这个标记就**不跑**。
   const save = useMutation({
-    mutationFn: async (next) => ctx.rest('/settings', { method: 'POST', body: { settings: next } }),
+    mutationFn: async (next) => {
+      const body = { ...next }
+      // **时间点清空 → 打「禁用」标记**
+      body.scan_times_disabled = !(body.scan_times && body.scan_times.length)
+      body.push_times_disabled = !(body.push_times && body.push_times.length)
+      return ctx.rest('/settings', { method: 'POST', body: { settings: body } })
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['job-radar', 'config'] })
       host.notify({ kind: 'success', message: '设置已保存' })
@@ -2180,6 +2236,91 @@ function SettingsView({ ctx, cfg }) {
           local,
           set,
         }),
+      }),
+      jsx('div', { className: 'h-3' }),
+      // ── **可选方向** ──
+      //
+      // 用户诉求：「由 Agent 评估用户经历，确定用户可选方向、
+      // 根据可选方向每天只推荐单个方向中评分最高的 5 条」
+      //
+      // **每天只推一个方向** → 方向得先定下来。
+      // 没选 = 全方向都算（按分数最高的那个推）。
+      jsx(Panel, {
+        title: '可选方向',
+        hint: (local.directions && local.directions.length)
+          ? ('已选 ' + local.directions.length + ' 个：' + local.directions.join('、'))
+          : '没选 = 全方向都算（推分数最高的方向）',
+        actions: jsxs('div', { className: 'flex items-center gap-2', children: [
+          jsx(Button, {
+            size: 'sm',
+            variant: 'default',
+            disabled: save.isPending,
+            onClick: () => save.mutate(local),
+            children: save.isPending ? '保存中…' : '保存',
+          }),
+        ] }),
+        children: jsxs('div', { className: 'flex flex-col gap-2', children: [
+          jsx('div', {
+            className: 'text-[0.6875rem] text-(--ui-text-tertiary)',
+            children: '选你能投的方向。带「你做过」的是从你的经历里认出来的，' +
+              '优先选它。每天只推**一个**方向里评分最高的 5 条，方向之间轮着来。',
+          }),
+          jsx(DirectionPicker, {
+            ctx,
+            value: local.directions || [],
+            // **走 /directions 接口**（存 profile）——
+            // 方向是**画像的一部分**（跟经历、方向权重一起），
+            // 不该塞进 Hermes 全局设置。
+            // 推送时 `tools.push` 读的就是 profile。
+            onChange: (v) => saveDirections.mutate(v),
+          }),
+        ] }),
+      }),
+      jsx('div', { className: 'h-3' }),
+      // ── **抓取/推送时间** ──
+      //
+      // 用户诉求：「用户可自定义抓取时间及推送时间」
+      jsx(Panel, {
+        title: '抓取与推送时间',
+        hint: '留空 = 不按点自动跑',
+        actions: jsxs('div', { className: 'flex items-center gap-2', children: [
+          jsx(Button, {
+            size: 'sm',
+            variant: 'default',
+            disabled: save.isPending,
+            onClick: () => save.mutate(local),
+            children: save.isPending ? '保存中…' : '保存',
+          }),
+        ] }),
+        children: jsxs('div', { className: 'grid grid-cols-2 gap-4', children: [
+          jsx(Field, {
+            label: '每天抓取时间',
+            hint: '到点自动抓一轮',
+            children: jsx(TimeSlotEditor, {
+              value: local.scan_times || [],
+              onChange: (v) => set('scan_times', v),
+              addLabel: '添加抓取时间',
+            }),
+          }),
+          jsx(Field, {
+            label: '每天推送时间',
+            hint: '到点推送该方向最高分的几条',
+            children: jsx(TimeSlotEditor, {
+              value: local.push_times || [],
+              onChange: (v) => set('push_times', v),
+              addLabel: '添加推送时间',
+            }),
+          }),
+          jsx(Field, {
+            label: '每方向推送条数',
+            hint: '同一个方向里推几条（默认 5）',
+            children: jsx(Input, {
+              type: 'number',
+              value: String(local.push_max ?? 5),
+              onChange: (e) => set('push_max', Number(e.target.value) || 0),
+            }),
+          }),
+        ] }),
       }),
       jsx('div', { className: 'h-3' }),
       jsx(Panel, {
@@ -2279,6 +2420,121 @@ function CityPicker({ ctx, value, onChange }) {
 
 /* 筛选条件的字段组 —— 「设置」页和「今日候选 ▸ 高级」共用一套，
  * 免得同一个东西两处长得不一样（之前就是这么对不上的）。 */
+/* 时间点编辑器 —— 每天几点抓 / 几点推。
+ *
+ * **为什么是 HH:MM 文本而不是时间选择器** ——
+ * `<input type="time">` 在 Hermes 的 TDesign 主题里样式难统一，
+ * 而 ChipEditor 已经能处理「一串词」了。
+ *
+ * 用户要的是「自定义抓取时间及推送时间」—— 加几个时间点就够了。 */
+function TimeSlotEditor({ value, onChange, addLabel }) {
+  const [adding, setAdding] = React.useState(false)
+  const [input, setInput] = React.useState('')
+  const list = value || []
+  const add = () => {
+    const t = String(input || '').trim()
+    // **校验 HH:MM** —— 写错的时间点会让 cron 永远不触发
+    // **不用正则** —— 桌面端 JS 静态检查会把正则里的 `$`
+    // 当成未定义标识符（`$` 常被当成 jQuery）。
+    // 改用「按字符判断是不是数字」，等效且更保险。
+    const seg = t.split(':')
+    if (seg.length !== 2) return
+    const allDigits = (x) => x.length > 0 && x.length <= 2 &&
+      x.split('').every((c) => c >= '0' && c <= '9')
+    if (!allDigits(seg[0]) || !allDigits(seg[1])) return
+    const h = Number(seg[0])
+    const m = Number(seg[1])
+    if (h > 23 || m > 59) return
+    const norm = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0')
+    if (list.indexOf(norm) < 0) onChange(list.concat([norm]))
+    setInput('')
+    setAdding(false)
+  }
+  return jsxs('div', { className: 'flex flex-wrap items-center gap-2', children: [
+    list.map((t) => jsxs('span', {
+      key: t,
+      className: 'inline-flex items-center gap-1 rounded-md border border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) px-2 py-1 text-xs',
+      children: [
+        jsx('span', { className: 'font-mono', children: t }),
+        jsx('button', {
+          type: 'button',
+          className: 'text-(--ui-text-tertiary) hover:text-(--ui-text-primary)',
+          onClick: () => onChange(list.filter((x) => x !== t)),
+          children: '×',
+        }),
+      ],
+    })),
+    adding
+      ? jsxs('div', { className: 'inline-flex items-center gap-1', children: [
+          jsx(Input, {
+            className: 'w-24',
+            placeholder: 'HH:MM',
+            value: input,
+            onChange: (e) => setInput(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') add() },
+          }),
+          jsx(Button, { size: 'sm', variant: 'default', onClick: add, children: '确定' }),
+          jsx(Button, {
+            size: 'sm', variant: 'outline',
+            onClick: () => { setAdding(false); setInput('') },
+            children: '取消',
+          }),
+        ] })
+      : jsx(Button, {
+          size: 'sm', variant: 'outline',
+          onClick: () => setAdding(true),
+          children: addLabel || '添加时间',
+        }),
+  ] })
+}
+
+/* 方向选择器 —— 用户能投哪些方向。
+ *
+ * **为什么多选而不是单选** —— 用户往往**同时**能投好几个方向
+ * （电商运营 + 建筑施工管理），每天轮着推。
+ *
+ * **显示岗位数** —— 只有 1 条岗位的方向推出来也没意义，
+ * 用户看着「1 条」就不会选。 */
+function DirectionPicker({ ctx, value, onChange }) {
+  const q = useQuery({
+    queryKey: ['job-radar', 'directions'],
+    queryFn: async () => ctx.rest('/directions'),
+  })
+  const list = (q.data && q.data.directions) || []
+  const sel = value || []
+  if (q.isLoading) {
+    return jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children: '读取方向中…' })
+  }
+  if (!list.length) {
+    return jsx('div', {
+      className: 'text-xs text-(--ui-text-tertiary)',
+      children: '还没有抓到岗位 —— 先抓一轮，方向会按岗位自动归类',
+    })
+  }
+  return jsxs('div', { className: 'flex flex-wrap gap-2', children:
+    list.map((d) => {
+      const on = sel.indexOf(d.name) >= 0
+      return jsxs('button', {
+        key: d.name,
+        type: 'button',
+        className: 'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors ' +
+          (on ? 'border-(--ui-accent) bg-(--ui-accent-subtle) text-(--ui-text-primary)'
+               : 'border-(--ui-stroke-tertiary) bg-(--ui-bg-elevated) text-(--ui-text-secondary) hover:text-(--ui-text-primary)'),
+        onClick: () => {
+          onChange(on ? sel.filter((x) => x !== d.name) : sel.concat([d.name]))
+        },
+        children: [
+          jsx('span', { children: d.name }),
+          jsx('span', { className: 'text-[0.6875rem] opacity-60', children: String(d.count) }),
+          d.from_experience
+            ? jsx('span', { className: 'text-[0.6875rem] opacity-80', children: '· 你做过' })
+            : null,
+        ],
+      })
+    }),
+  })
+}
+
 function FilterFields({ local, set }) {
   return jsxs('div', {
     className: 'grid grid-cols-2 gap-4',
